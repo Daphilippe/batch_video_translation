@@ -1,0 +1,30 @@
+# Configuration
+configs/settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Workspace / Data
+project_workspace/
+internals/
+subtitles_ready/
+data/translation_cache.json
+
+# Media files (Sécurité si tu les déplaces par erreur)
+*.mp4
+*.mkv
+*.avi
+*.wav
+*.mp3
+
+# Whisper models and bins
+*.bin
+*.exe
+
+# OS
+.DS_Store
+Thumbs.db

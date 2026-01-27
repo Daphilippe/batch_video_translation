@@ -1,0 +1,24 @@
+{
+  "base_working_dir": "./project_workspace",
+  "whisper": {
+    "bin_path": "C:/path/to/whisper.cpp/main.exe",
+    "model_path": "C:/path/to/whisper.cpp/models/ggml-medium.bin",
+    "lang": "auto"
+  },
+  "llm_config": {
+    "source_lang": "English",
+    "target_lang": "French",
+    "chunk_size": 25
+  },
+  "translation": {
+    "source_lang": "en",
+    "target_lang": "fr",
+    "max_chars_batch": 2000,
+    "retry_delay": 30,
+    "cache_file": "data/translation_cache.json"
+  },
+  "technical_dictionary": {
+    "source_term": "translated_term",
+    "example_word": "mot_exemple"
+  }
+}
