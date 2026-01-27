@@ -11,6 +11,7 @@ class CopilotUIProvider(LLMProvider):
     def __init__(self, window_title="Edge"):
         self.window_title = window_title
         self._find_window()
+        self.name = "UI LLM translation"
 
     def _find_window(self):
         windows = Desktop(backend="uia").windows()
@@ -30,7 +31,7 @@ class CopilotUIProvider(LLMProvider):
                 return
             time.sleep(0.05)
 
-    def ask(self, prompt: str) -> str:
+    def ask(self, content, prompt: str) -> str:
         """Implementation of the UI-based interaction."""
         # 1. Prepare prompt
         pyperclip.copy(prompt)

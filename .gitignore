@@ -1,5 +1,6 @@
 # Configuration
 configs/settings.json
+configs/system_prompt.txt
 
 # Python
 __pycache__/

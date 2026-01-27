@@ -12,6 +12,7 @@ from modules.srt_optimizer import SRTOptimizer
 from modules.llm_translator import LLMTranslator
 from modules.legacy_translator import LegacyTranslator
 from modules.providers.copilot_ui import CopilotUIProvider
+from modules.providers.llama_provider import LlamaCPPProvider
 
 # Advanced Logging Setup
 logging.basicConfig(
@@ -111,8 +112,16 @@ class VideoTranslationPipeline:
         if mode in ["full", "translate"]:
             clean_srt_count = self._get_file_count(self.dirs["clean_srt"], (".srt",))
             logger.info(f"Step 4/4: Translation | Engine: {engine} | Source: {clean_srt_count} files.")
-            
-            if engine == "llm":
+            if (engine == "llm-local"):
+                logger.info("Initializing UI Automation Provider...")
+                provider = LlamaCPPProvider()
+                translator = LLMTranslator(
+                    input_dir=str(self.dirs["clean_srt"]),
+                    output_dir=str(self.dirs["final"]),
+                    provider=provider,
+                    config=self.config["llm_config"]
+                )
+            elif (engine == "llm-ui"):
                 logger.info("Initializing UI Automation Provider...")
                 provider = CopilotUIProvider(window_title="Edge")
                 translator = LLMTranslator(
@@ -138,7 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Path to source video folder")
     parser.add_argument("--output", required=True, help="Path to result folder")
     parser.add_argument("--mode", default="full", choices=["full", "extract", "transcribe", "optimize", "translate"])
-    parser.add_argument("--engine", default="llm", choices=["llm", "legacy"])
+    parser.add_argument("--engine", default="legacy", choices=["llm-local","llm-ui", "legacy"])
     
     args = parser.parse_args()
     pipeline = VideoTranslationPipeline(output_dir=args.output)

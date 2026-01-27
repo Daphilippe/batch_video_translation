@@ -15,7 +15,8 @@
     "target_lang": "fr",
     "max_chars_batch": 2000,
     "retry_delay": 30,
-    "cache_file": "data/translation_cache.json"
+    "cache_file": "data/translation_cache.json",
+    "prompt_file":"configs/system_prompt.txt"
   },
   "technical_dictionary": {
     "source_term": "translated_term",
