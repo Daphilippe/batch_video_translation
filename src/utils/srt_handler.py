@@ -211,10 +211,16 @@ class SRTHandler:
         return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
     @classmethod
-    def get_blocks_in_range(cls, blocks: list, start_sec: float, end_sec: float) -> list:
-        """Filters blocks that fall within a specific time range."""
+    def get_blocks_in_range(cls, blocks: list, start_sec: float, end_sec: float, margin: float = 0.05) -> list:
+        """Filters blocks that overlap with a specific time range.
+        
+        Uses overlap logic (not strict containment) so that blocks whose
+        timestamps were shifted by standardize/merge across different
+        translation streams (S1, L1, Mt) are still captured.
+        A small margin (default 50ms) provides additional tolerance.
+        """
         return [
             b for b in blocks 
-            if cls.timestamp_to_seconds(b['start']) >= start_sec 
-            and cls.timestamp_to_seconds(b['end']) <= end_sec
+            if cls.timestamp_to_seconds(b['start']) <= end_sec + margin
+            and cls.timestamp_to_seconds(b['end']) >= start_sec - margin
         ]

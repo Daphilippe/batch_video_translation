@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import random
 import logging
@@ -77,7 +78,7 @@ class LegacyTranslator(BaseTranslator):
         # 1. Analyze file and check line-cache
         for line in lines:
             clean = line.strip()
-            if clean.isdigit() or "-->" in clean or not clean:
+            if re.match(r"^[0-9]+$", clean) or "-->" in clean or not clean:
                 final_lines.append(line)
             else:
                 l_hash = SRTHandler.get_hash(clean)

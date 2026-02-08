@@ -115,13 +115,18 @@ class VideoTranslationPipeline:
 
                 # C. Arbitrage Final (Hybrid Refiner)
                 logger.info("Performing Final Hybrid Refinement...")
+                refiner_config = {
+                    **self.config.get("translation", {}),
+                    "chunk_size": self.config.get("llm_config", {}).get("chunk_size",
+                                  self.config.get("translation", {}).get("chunk_size", 10)),
+                }
                 refiner = HybridRefiner(
                     s1_dir=str(self.dirs["clean_srt"]),
                     l1_dir=str(self.dirs["legacy_mt"]),
                     mt_dir=str(self.dirs["llm_mt"]),
                     output_dir=str(self.dirs["final"]),
                     provider=provider,
-                    config=self.config["translation"]
+                    config=refiner_config
                 )
                 refiner.run()
 
@@ -133,6 +138,10 @@ class VideoTranslationPipeline:
                 elif engine == "llm-ui":
                     provider = CopilotUIProvider(window_title="Edge")
                     translator = LLMTranslator(str(self.dirs["clean_srt"]), str(self.dirs["final"]), provider, self.config.get("llm_config", self.config.get("translation", {})))
+                else:  # legacy
+                    translator = LegacyTranslator(str(self.dirs["clean_srt"]), str(self.dirs["final"]), "configs/settings.json")
+
+                translator.run()
 
         logger.info("✨ ALL PIPELINE TASKS FINISHED SUCCESSFULLY! ✨")
 

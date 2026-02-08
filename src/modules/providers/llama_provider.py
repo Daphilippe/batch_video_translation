@@ -1,9 +1,10 @@
 import requests
 import logging
+from modules.providers.base_provider import LLMProvider, LLMProviderError
 
 logger = logging.getLogger(__name__)
 
-class LlamaCPPProvider:
+class LlamaCPPProvider(LLMProvider):
     def __init__(self, url="http://127.0.0.1:8080"):
         # llama.cpp utilise /v1/chat/completions pour la compatibilité OpenAI
         self.url = f"{url}/v1/chat/completions"
@@ -36,8 +37,6 @@ class LlamaCPPProvider:
             return data['choices'][0]['message']['content']
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Erreur de connexion au serveur llama.cpp: {e}")
-            return ""
+            raise LLMProviderError(f"Connection error to llama.cpp server: {e}") from e
         except (KeyError, IndexError) as e:
-            logger.error(f"Format de réponse invalide de llama.cpp: {e}")
-            return ""
+            raise LLMProviderError(f"Invalid response format from llama.cpp: {e}") from e
