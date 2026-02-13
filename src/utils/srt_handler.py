@@ -4,6 +4,7 @@ import unicodedata
 import logging
 from pathlib import Path
 from datetime import timedelta
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,8 @@ class SRTHandler:
         return f"{new_h:02d}:{new_m:02d}:{new_s:02d},{new_ms:03d}"
 
     @classmethod
-    def apply_offset_to_blocks(cls, blocks: list, offset_seconds: int) -> list:
-        """Applies a time offset to a list of parsed SRT blocks."""
+    def apply_offset_to_blocks(cls, blocks: List[Dict], offset_seconds: int) -> List[Dict]:
+        """Applies a time offset to a list of parsed SRT blocks (returns new copies)."""
         if offset_seconds == 0:
             return blocks
             
@@ -48,10 +49,13 @@ class SRTHandler:
             if b.get('start') is None or b.get('end') is None:
                 logger.warning(f"Skipping malformed block: {b}")
                 continue
-                
-            b['start'] = cls.shift_timestamp(b['start'], offset_seconds)
-            b['end'] = cls.shift_timestamp(b['end'], offset_seconds)
-            valid_blocks.append(b)
+            
+            shifted = {
+                **b,
+                'start': cls.shift_timestamp(b['start'], offset_seconds),
+                'end': cls.shift_timestamp(b['end'], offset_seconds),
+            }
+            valid_blocks.append(shifted)
         return valid_blocks
 
     @staticmethod
@@ -75,40 +79,11 @@ class SRTHandler:
         return hashlib.sha256(cls.canonicalize(text).encode("utf-8")).hexdigest()
 
     @classmethod
-    def extract_timestamps(cls, path: Path) -> list:
+    def extract_timestamps(cls, path: Path) -> List[str]:
         if not path.exists(): return []
         with open(path, "r", encoding="utf-8") as f:
             return [line.strip() for line in f if "-->" in line and cls.TIMESTAMP_RE.fullmatch(line.strip())]
 
-    @classmethod
-    def normalize_file(cls, path_in: Path, path_out: Path):
-        """Rebuilds the SRT to ensure perfect 1, 2, 3 numbering and clean spacing."""
-        with open(path_in, "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        blocks = []
-        current_ts = None
-        current_text = []
-        
-        for line in content.splitlines():
-            line = line.strip()
-            if not line: continue
-            if "-->" in line and cls.TIMESTAMP_RE.fullmatch(line):
-                if current_ts and current_text:
-                    blocks.append((current_ts, " ".join(current_text)))
-                current_ts, current_text = line, []
-            elif not line.isdigit():
-                current_text.append(line)
-        
-        if current_ts and current_text:
-            blocks.append((current_ts, " ".join(current_text)))
-
-        output = [f"{i}\n{ts}\n{txt}\n" for i, (ts, txt) in enumerate(blocks, 1)]
-        final_text = "\n".join(output)
-
-        with open(path_out, "w", encoding="utf-8") as f:
-            f.write(final_text)
-            
     @staticmethod
     def parse_to_blocks(content: str) -> list:
         """Parses SRT content with aggressive cleaning of LLM artifacts."""
@@ -123,7 +98,7 @@ class SRTHandler:
             if not line:
                 continue
 
-            if re.match(r"^\d+$", line):
+            if re.match(r"^[0-9]+$", line):
                 if current["index"] is not None and current["start"] is not None:
                     blocks.append(current)
                 current = {"index": int(line), "start": None, "end": None, "text": []}
@@ -135,7 +110,13 @@ class SRTHandler:
 
             else:
                 if current["start"] is not None:
-                    clean_line = re.sub(r"^['\"\[\s]+|['\"\]\s]+$", "", line)
+                    # Only strip full-line wrapping quotes (LLM artifact),
+                    # preserve legitimate brackets like [Music] and internal quotes
+                    clean_line = line.strip()
+                    if len(clean_line) >= 2:
+                        if (clean_line[0] == '"' and clean_line[-1] == '"') or \
+                           (clean_line[0] == "'" and clean_line[-1] == "'"):
+                            clean_line = clean_line[1:-1].strip()
                     if clean_line:
                         current["text"].append(clean_line)
                 else:
@@ -191,13 +172,13 @@ class SRTHandler:
         # 2. Merge consecutive blocks with same text
         merged = cls.merge_identical_blocks(blocks)
         
-        # 3. Remove blocks with no text or invalid data
+        # 3. Remove blocks with no text or invalid data, apply clean_text
         cleaned = []
         for b in merged:
             text_content = "".join(b['text']).strip() if isinstance(b['text'], list) else str(b['text']).strip()
             if b.get('start') and b.get('end') and text_content:
-                # Ensure text is stored as a clean string for final rendering
-                b['text'] = text_content
+                # Clean LLM artifacts (bold markers, special chars, extra whitespace)
+                b['text'] = cls.clean_text(text_content)
                 cleaned.append(b)
         
         # 4. Render back to string with fresh indexing (1, 2, 3...)

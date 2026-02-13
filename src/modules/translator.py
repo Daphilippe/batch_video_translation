@@ -1,30 +1,35 @@
 import time
 import logging
 from pathlib import Path
+from typing import Optional
 from utils.file_handler import DirectoryMirrorTask
 from utils.srt_handler import SRTHandler
 
 logger = logging.getLogger(__name__)
 
 class BaseTranslator(DirectoryMirrorTask):
-    def __init__(self, input_dir, output_dir, bot=None, extensions=(".srt",)):
+    def __init__(self, input_dir: str, output_dir: str, extensions: tuple = (".srt",)):
         super().__init__(input_dir, output_dir, extensions)
-        self.bot = bot
         self.name = "Base"
 
-    def wait_for_stability(self, path: Path, timeout=10):
-        """Ensures the file is fully written to disk."""
+    def wait_for_stability(self, path: Path, timeout: int = 10) -> bool:
+        """
+        Ensures the file is fully written to disk before proceeding.
+        Useful on Windows where antivirus/indexers may hold file locks,
+        or when I/O is slow on network-mounted drives.
+        """
         start = time.time()
         last_size = -1
         while time.time() - start < timeout:
             if path.exists():
                 size = path.stat().st_size
-                if size == last_size and size > 0: return True
+                if size == last_size and size > 0:
+                    return True
                 last_size = size
             time.sleep(0.1)
         return False
 
-    def process_file(self, input_file: Path):
+    def process_file(self, input_file: Path) -> None:
         output_file = self.get_output_path(input_file, ".srt")
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -56,14 +61,12 @@ class BaseTranslator(DirectoryMirrorTask):
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(final_standardized)
-
+        
         self.wait_for_stability(output_file)
         
         duration = (time.time() - start_time) / 60
         logger.info(f"[DONE] {output_file.name} in {duration:.2f} minutes.")
 
-    def translate_logic(self, text: str):
+    def translate_logic(self, text: str) -> str:
         """To be implemented by specific translation modules."""
         raise NotImplementedError
-
-# --- Note: You can keep LLMTranslator here or move it to its own file ---

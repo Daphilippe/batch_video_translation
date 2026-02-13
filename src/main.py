@@ -1,9 +1,10 @@
 import argparse
 import json
 import logging
+import shutil
 import sys
-import os
 from pathlib import Path
+from typing import Optional
 
 # Module Imports
 from modules.extractor import AudioExtractor
@@ -11,7 +12,8 @@ from modules.transcriber import WhisperTranscriber
 from modules.srt_optimizer import SRTOptimizer
 from modules.llm_translator import LLMTranslator
 from modules.legacy_translator import LegacyTranslator
-from modules.strategies.hybrid_refiner import HybridRefiner # Nouveau
+from modules.strategies.hybrid_refiner import HybridRefiner
+from modules.translator import BaseTranslator
 from modules.providers.copilot_ui import CopilotUIProvider
 from modules.providers.llama_provider import LlamaCPPProvider
 
@@ -25,13 +27,20 @@ logging.basicConfig(
 logger = logging.getLogger("VideoPipeline")
 
 class VideoTranslationPipeline:
-    def __init__(self, output_dir, config_path="configs/settings.json"):
-        logger.info(f"--- Initializing Pipeline ---")
+    def __init__(self, output_dir: str, config_path: str = "configs/settings.json"):
+        logger.info("--- Initializing Pipeline ---")
         logger.info(f"Loading configuration from: {config_path}")
         
-        with open(config_path, "r", encoding="utf-8") as f:
-            self.config = json.load(f)
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                self.config = json.load(f)
+        except FileNotFoundError:
+            raise ValueError(f"Configuration file not found: '{config_path}'")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in configuration file '{config_path}': {e}")
         
+        self._validate_config()
+        self._validate_binaries()
         self.final_output = Path(output_dir)
         self.work_dir = self.final_output / "internals"
 
@@ -48,9 +57,45 @@ class VideoTranslationPipeline:
         for name, path in self.dirs.items():
             path.mkdir(parents=True, exist_ok=True)
 
+    def _validate_config(self) -> None:
+        """Validates that required configuration sections and keys are present."""
+        required_keys = {
+            "whisper": ["bin_path", "model_path"],
+            "llm_config": ["source_lang", "target_lang"],
+        }
+        for section, keys in required_keys.items():
+            if section not in self.config:
+                raise ValueError(f"Missing required config section: '{section}'")
+            for key in keys:
+                if key not in self.config[section]:
+                    raise ValueError(f"Missing required config key: '{section}.{key}'")
+
+    def _validate_binaries(self) -> None:
+        """Validates that required external binaries are accessible."""
+        # Validate FFmpeg
+        if not shutil.which("ffmpeg"):
+            raise FileNotFoundError(
+                "FFmpeg not found in PATH. Install it and ensure it's accessible."
+            )
+        
+        # Validate Whisper binary
+        whisper_bin = Path(self.config["whisper"]["bin_path"])
+        if not whisper_bin.exists():
+            raise FileNotFoundError(
+                f"Whisper binary not found at: {whisper_bin}"
+            )
+        
+        # Validate Whisper model
+        model_path = Path(self.config["whisper"]["model_path"])
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"Whisper model file not found at: {model_path}"
+            )
+
     def _get_file_count(self, path, extension):
         """Helper to count files or directories for progress tracking."""
-        if not path.exists(): return 0
+        if not path.exists():
+            return 0
         if extension == "dir":
             return len([d for d in path.iterdir() if d.is_dir()])
         return len([f for f in path.iterdir() if f.suffix.lower() in extension])
@@ -97,63 +142,111 @@ class VideoTranslationPipeline:
         if mode in ["full", "translate"]:
             clean_srt_count = self._get_file_count(self.dirs["clean_srt"], (".srt",))
             logger.info(f"Step 4/4: Translation | Engine: {engine} | Source: {clean_srt_count} files.")
-            
-            # --- Cas 1 : Engine HYBRID (S1 + L1 + Mt) ---
+
             if engine == "hybrid":
-                logger.info("Starting Hybrid Protocol (Arbitration S1/L1/Mt)...")
-                
-                # A. Génération de L1 (Legacy)
-                logger.info("Generating L1 (Literal)...")
-                legacy = LegacyTranslator(input_dir=str(self.dirs["clean_srt"]), output_dir=str(self.dirs["legacy_mt"]), config_path="configs/settings.json")
-                legacy.run()
-
-                # B. Génération de Mt (LLM Draft)
-                logger.info("Generating Mt (LLM Draft)...")
-                provider = LlamaCPPProvider() # Utilise ton serveur local
-                llm_draft = LLMTranslator(input_dir=str(self.dirs["clean_srt"]), output_dir=str(self.dirs["llm_mt"]), provider=provider, config=self.config.get("llm_config", self.config.get("translation", {})))
-                llm_draft.run()
-
-                # C. Arbitrage Final (Hybrid Refiner)
-                logger.info("Performing Final Hybrid Refinement...")
-                refiner_config = {
-                    **self.config.get("translation", {}),
-                    "chunk_size": self.config.get("llm_config", {}).get("chunk_size",
-                                  self.config.get("translation", {}).get("chunk_size", 10)),
-                }
-                refiner = HybridRefiner(
-                    s1_dir=str(self.dirs["clean_srt"]),
-                    l1_dir=str(self.dirs["legacy_mt"]),
-                    mt_dir=str(self.dirs["llm_mt"]),
-                    output_dir=str(self.dirs["final"]),
-                    provider=provider,
-                    config=refiner_config
-                )
-                refiner.run()
-
-            # --- Cas 2 : Autres Moteurs (Direct) ---
+                self._run_hybrid_pipeline()
             else:
-                if engine == "llm-local":
-                    provider = LlamaCPPProvider()
-                    translator = LLMTranslator(str(self.dirs["clean_srt"]), str(self.dirs["final"]), provider, self.config.get("llm_config", self.config.get("translation", {})))
-                elif engine == "llm-ui":
-                    provider = CopilotUIProvider(window_title="Edge")
-                    translator = LLMTranslator(str(self.dirs["clean_srt"]), str(self.dirs["final"]), provider, self.config.get("llm_config", self.config.get("translation", {})))
-                else:  # legacy
-                    translator = LegacyTranslator(str(self.dirs["clean_srt"]), str(self.dirs["final"]), "configs/settings.json")
-
+                translator = self._create_translator(engine)
                 translator.run()
 
+            logger.info(f"Step 4/4: Completed. Final files: {self.dirs['final']}")
+
         logger.info("✨ ALL PIPELINE TASKS FINISHED SUCCESSFULLY! ✨")
+
+    def _run_hybrid_pipeline(self):
+        """Runs the full hybrid protocol: L1 (Legacy) + Mt (LLM Draft) → Refiner."""
+        logger.info("Starting Hybrid Protocol (Arbitration S1/L1/Mt)...")
+
+        # A. Generate L1 (Literal translation via Legacy)
+        logger.info("Generating L1 (Literal)...")
+        legacy = LegacyTranslator(
+            input_dir=str(self.dirs["clean_srt"]),
+            output_dir=str(self.dirs["legacy_mt"]),
+            config=self.config
+        )
+        legacy.run()
+
+        # B. Generate Mt (LLM Draft)
+        logger.info("Generating Mt (LLM Draft)...")
+        provider = LlamaCPPProvider()
+        llm_config = self.config.get("llm_config", self.config.get("translation", {}))
+        llm_draft = LLMTranslator(
+            input_dir=str(self.dirs["clean_srt"]),
+            output_dir=str(self.dirs["llm_mt"]),
+            provider=provider,
+            config=llm_config
+        )
+        llm_draft.run()
+
+        # C. Final Arbitration (Hybrid Refiner)
+        logger.info("Performing Final Hybrid Refinement...")
+        refiner_config = {
+            **self.config.get("translation", {}),
+            "chunk_size": llm_config.get("chunk_size",
+                          self.config.get("translation", {}).get("chunk_size", 10)),
+        }
+        refiner = HybridRefiner(
+            s1_dir=str(self.dirs["clean_srt"]),
+            l1_dir=str(self.dirs["legacy_mt"]),
+            mt_dir=str(self.dirs["llm_mt"]),
+            output_dir=str(self.dirs["final"]),
+            provider=provider,
+            config=refiner_config
+        )
+        refiner.run()
+
+    def _create_translator(self, engine: str) -> BaseTranslator:
+        """Factory method for translator engine creation."""
+        engine_factories = {
+            "llm-local": self._create_llm_local_translator,
+            "llm-ui": self._create_llm_ui_translator,
+            "legacy": self._create_legacy_translator,
+        }
+        factory = engine_factories.get(engine)
+        if not factory:
+            raise ValueError(
+                f"Unknown engine: '{engine}'. Available: {list(engine_factories.keys())}"
+            )
+        return factory()
+
+    def _create_llm_local_translator(self) -> LLMTranslator:
+        logger.info("Initializing Local LLM Provider (llama.cpp)...")
+        provider = LlamaCPPProvider()
+        return LLMTranslator(
+            input_dir=str(self.dirs["clean_srt"]),
+            output_dir=str(self.dirs["final"]),
+            provider=provider,
+            config=self.config["llm_config"]
+        )
+
+    def _create_llm_ui_translator(self) -> LLMTranslator:
+        logger.info("Initializing UI Automation Provider...")
+        provider = CopilotUIProvider(window_title="Edge")
+        return LLMTranslator(
+            input_dir=str(self.dirs["clean_srt"]),
+            output_dir=str(self.dirs["final"]),
+            provider=provider,
+            config=self.config["llm_config"]
+        )
+
+    def _create_legacy_translator(self) -> LegacyTranslator:
+        logger.info("Initializing Legacy Translator...")
+        return LegacyTranslator(
+            input_dir=str(self.dirs["clean_srt"]),
+            output_dir=str(self.dirs["final"]),
+            config=self.config
+        )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-stage Video Translation Pipeline")
     parser.add_argument("--input", required=True, help="Path to source video folder")
     parser.add_argument("--output", required=True, help="Path to result folder")
+    parser.add_argument("--config", default="configs/settings.json", help="Path to configuration file")
     parser.add_argument("--mode", default="full", choices=["full", "extract", "transcribe", "optimize", "translate"])
     parser.add_argument("--engine", default="legacy", choices=["llm-local","llm-ui", "legacy", "hybrid"])
     
     args = parser.parse_args()
-    pipeline = VideoTranslationPipeline(output_dir=args.output)
+    pipeline = VideoTranslationPipeline(output_dir=args.output, config_path=args.config)
     try:
         pipeline.run(input_dir=args.input, mode=args.mode, engine=args.engine)
     except KeyboardInterrupt:

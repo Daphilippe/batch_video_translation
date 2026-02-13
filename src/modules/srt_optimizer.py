@@ -6,23 +6,23 @@ from utils.srt_handler import SRTHandler
 logger = logging.getLogger(__name__)
 
 class SRTOptimizer(DirectoryMirrorTask):
-    def __init__(self, input_dir, output_dir, extensions=(".srt",)):
+    def __init__(self, input_dir: str, output_dir: str, extensions: tuple = (".srt",)):
         super().__init__(input_dir, output_dir, extensions)
 
-    def process_file(self, input_file: Path):
-            output_file = self.get_output_path(input_file, ".srt")
-            
-            with open(input_file, "r", encoding="utf-8") as f:
-                content = f.read()
+    def process_file(self, input_file: Path) -> None:
+        output_file = self.get_output_path(input_file, ".srt")
 
-            # Apply the full conditioning immediately
-            standardized_content = SRTHandler.standardize(content)
+        with open(input_file, "r", encoding="utf-8") as f:
+            content = f.read()
 
-            logger.info(f"[STEP 3] Standardizing structure: {input_file.name}")
-            
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(standardized_content)
+        # Apply the full conditioning immediately
+        standardized_content = SRTHandler.standardize(content)
+
+        logger.info(f"[STEP 3] Standardizing structure: {input_file.name}")
+
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(standardized_content)
 
 if __name__ == "__main__":
     import argparse

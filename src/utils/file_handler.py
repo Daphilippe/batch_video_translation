@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Tuple, List
+from typing import Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class DirectoryMirrorTask:
         target_path = self.output_dir / relative_path
         return target_path.with_suffix(new_extension)
 
-    def run(self):
+    def run(self) -> None:
         """Standardized loop for all batch processing tasks."""
         if not self.input_dir.exists():
             logger.error(f"Source directory not found: {self.input_dir}")
@@ -33,6 +33,6 @@ class DirectoryMirrorTask:
                     # The specific logic will be implemented in subclasses
                     self.process_file(input_file)
 
-    def process_file(self, input_file: Path):
+    def process_file(self, input_file: Path) -> None:
         """To be overridden by child classes."""
         raise NotImplementedError("Subclasses must implement process_file")

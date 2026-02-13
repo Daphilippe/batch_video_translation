@@ -1,4 +1,5 @@
 import subprocess
+import shutil
 import logging
 from pathlib import Path
 from utils.file_handler import DirectoryMirrorTask
@@ -6,14 +7,18 @@ from utils.file_handler import DirectoryMirrorTask
 logger = logging.getLogger(__name__)
 
 class AudioExtractor(DirectoryMirrorTask):
-    def __init__(self, input_dir, output_dir, extensions=(".mp4", ".mkv"), segment_time=600):
+    def __init__(self, input_dir: str, output_dir: str, extensions: tuple = (".mp4", ".mkv"), segment_time: int = 600):
         """
         Initializes the extractor with segmentation support.
         :param segment_time: Duration of each audio chunk in seconds.
         """
         super().__init__(input_dir, output_dir, extensions)
         self.sample_rate = "16000"
-        self.segment_time = segment_time 
+        self.segment_time = segment_time
+        
+        # Validate FFmpeg availability
+        if not shutil.which("ffmpeg"):
+            raise FileNotFoundError("FFmpeg not found in PATH. Install it and ensure it's accessible.")
 
     def process_file(self, input_file: Path):
         """

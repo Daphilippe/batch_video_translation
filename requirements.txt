@@ -1,17 +1,18 @@
-# --- Cœur du Pipeline ---
-pywinauto==0.6.9        # Automatisation de Edge/Copilot
-pywin32==306            # Interaction système Windows (clics, focus)
-pypiwin32==223          # Interface Python pour les APIs Windows
-pyperclip==1.9.0        # Communication via le presse-papiers avec le LLM
+# --- Pipeline Core ---
+pywinauto==0.6.9        # Edge/Copilot UI automation
+pywin32==306            # Windows system interaction (clicks, focus)
+pypiwin32==223          # Python interface for Windows APIs
+pyperclip==1.9.0        # Clipboard communication with LLM
 
-# --- Traduction & Texte ---
-deep-translator==1.11.4 # Moteur Legacy (Google Translate)
-regex==2024.11.6        # Parsing SRT robuste (utilisé par nos outils de nettoyage)
+# --- Translation & Text ---
+deep-translator==1.11.4 # Legacy engine (Google Translate)
+regex==2024.11.6        # Robust SRT parsing (used by cleaning tools)
+requests>=2.31.0        # HTTP client for local LLM providers
 
-# --- Automatisation Clavier/Souris ---
-keyboard==0.13.5        # Envoi de touches (Ctrl+V, Enter)
-mouse==0.7.1            # Détection des clics opérateur
+# --- Keyboard/Mouse Automation ---
+keyboard==0.13.5        # Keystroke sending (Ctrl+V, Enter)
+mouse==0.7.1            # Operator click detection
 
-# --- Dépendances Système ---
-python-dotenv==1.0.1    # Gestion optionnelle des variables d'environnement
-tqdm==4.66.4            # Barres de progression pour le suivi console
+# --- System Dependencies ---
+python-dotenv==1.0.1    # Optional environment variable management
+tqdm==4.66.4            # Console progress bars

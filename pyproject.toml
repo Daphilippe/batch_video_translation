@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "video-translation-pipeline"
+version = "0.1.0"
+description = "Automated video transcription and translation pipeline"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

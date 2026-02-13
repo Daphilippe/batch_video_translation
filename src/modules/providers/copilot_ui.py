@@ -31,22 +31,27 @@ class CopilotUIProvider(LLMProvider):
                 return
             time.sleep(0.05)
 
-    def ask(self, content, prompt: str) -> str:
-        """Implementation of the UI-based interaction."""
-        # 1. Prepare prompt
+    def ask(self, content: str, prompt: str) -> str:
+        """
+        Implementation of the UI-based interaction.
+        
+        Note: `content` (system instructions) is intentionally NOT re-sent each call.
+        In a browser-based session with a human operator, the context persists across
+        messages. The operator sets up the system prompt once at the start of the session.
+        Re-sending it every chunk would saturate the LLM's context window.
+        """
+        # Only copy the SRT chunk to translate — system prompt is already in the conversation
         pyperclip.copy(prompt)
         
-        print("\n[OPERATOR] 🖱️ Click inside the LLM input box to paste and send...")
+        logger.info("[OPERATOR] Click inside the LLM input box to paste and send...")
         self._wait_for_click()
         
         # 2. Automation: Paste and Enter
         keyboard.send_keys("^v")
-        # time.sleep(0.5)
-        # keyboard.send_keys("{ENTER}")
-        input("    Press any key ...")
+        input("    Press any key to continue...")
         
         # 3. Wait for manual copy back
-        print("[OPERATOR] ⏳ Wait for generation, then Ctrl+A -> Ctrl+C.")
+        logger.info("[OPERATOR] Wait for generation, then Ctrl+A -> Ctrl+C.")
         input("[OPERATOR] Press ENTER here once you have copied the response...")
         response = pyperclip.paste().strip()
         return response

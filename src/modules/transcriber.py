@@ -9,12 +9,18 @@ from utils.srt_handler import SRTHandler
 logger = logging.getLogger(__name__)
 
 class WhisperTranscriber(DirectoryMirrorTask):
-    def __init__(self, input_dir, output_dir, whisper_bin, model_path, lang="auto", segment_time=600):
+    def __init__(self, input_dir: str, output_dir: str, whisper_bin: str, model_path: str, lang: str = "auto", segment_time: int = 600):
         super().__init__(input_dir, output_dir, extensions=("",))
         self.whisper_bin = Path(whisper_bin)
         self.model_path = Path(model_path)
         self.lang = lang
         self.segment_time = segment_time
+        
+        # Validate whisper binary existence
+        if not self.whisper_bin.exists():
+            raise FileNotFoundError(f"Whisper binary not found at: {self.whisper_bin}")
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"Whisper model not found at: {self.model_path}")
 
     def _get_short_path(self, path: Path) -> str:
         if os.name != 'nt': return str(path)

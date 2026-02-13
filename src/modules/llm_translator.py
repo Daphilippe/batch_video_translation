@@ -1,7 +1,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from modules.translator import BaseTranslator
 from utils.srt_handler import SRTHandler
 from modules.providers.base_provider import LLMProvider
@@ -14,12 +14,12 @@ class LLMTranslator(BaseTranslator):
     and reassembles the result. Works through BaseTranslator.process_file() which
     handles skip logic, standardization, and wait_for_stability.
     """
-    def __init__(self, input_dir, output_dir, provider: LLMProvider, config: Dict):
+    def __init__(self, input_dir: str, output_dir: str, provider: LLMProvider, config: Dict):
         super().__init__(input_dir, output_dir, bot=provider, extensions=(".srt",))
         self.provider = provider
         self.config = config
-        self.chunk_size = config.get("chunk_size", 10)
-        self.chunk_delay = config.get("chunk_delay", 1.0)
+        self.chunk_size = config.get("chunk_size", 30)
+        self.chunk_delay = config.get("chunk_delay", 1.0)  # Seconds between LLM calls
         self.name = provider.name if hasattr(provider, 'name') else "LLM"
         self.system_instructions = self._load_custom_prompt(config)
 
@@ -84,7 +84,8 @@ class LLMTranslator(BaseTranslator):
                 logger.error(f"Failed to parse LLM response for chunk {idx}: {e}")
                 translated_full_blocks.extend(chunk)
 
-            # Rate-limit protection between chunks
+            # Rate-limit protection: pause between chunks to avoid overloading
+            # the LLM server (local or remote). Configurable via "chunk_delay".
             if idx < total_chunks:
                 time.sleep(self.chunk_delay)
 
