@@ -1,10 +1,9 @@
-import re
 import hashlib
-import unicodedata
 import logging
-from pathlib import Path
+import re
+import unicodedata
 from datetime import timedelta
-from typing import Dict, List, Optional
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -23,33 +22,33 @@ class SRTHandler:
             return ts_str
 
         h, m, s, ms = map(int, match.groups())
-        
+
         # Use timedelta for robust time math
         td = timedelta(hours=h, minutes=m, seconds=s, milliseconds=ms)
         new_td = td + timedelta(seconds=offset_seconds)
-        
+
         # Extract new components
         total_seconds = int(new_td.total_seconds())
         new_h = total_seconds // 3600
         new_m = (total_seconds % 3600) // 60
         new_s = total_seconds % 60
         new_ms = int(new_td.microseconds / 1000)
-        
+
         return f"{new_h:02d}:{new_m:02d}:{new_s:02d},{new_ms:03d}"
 
     @classmethod
-    def apply_offset_to_blocks(cls, blocks: List[Dict], offset_seconds: int) -> List[Dict]:
+    def apply_offset_to_blocks(cls, blocks: list[dict], offset_seconds: int) -> list[dict]:
         """Applies a time offset to a list of parsed SRT blocks (returns new copies)."""
         if offset_seconds == 0:
             return blocks
-            
+
         valid_blocks = []
         for b in blocks:
             # SAFETY CHECK: Skip blocks that are missing timestamps
             if b.get('start') is None or b.get('end') is None:
                 logger.warning(f"Skipping malformed block: {b}")
                 continue
-            
+
             shifted = {
                 **b,
                 'start': cls.shift_timestamp(b['start'], offset_seconds),
@@ -60,6 +59,7 @@ class SRTHandler:
 
     @staticmethod
     def clean_text(text: str) -> str:
+        """Removes LLM artifacts (bold markers, special chars, extra whitespace)."""
         replacements = {"**": "", "□": "-", "▪": "-", "…": "..."}
         for bad, good in replacements.items():
             text = text.replace(bad, good)
@@ -67,6 +67,7 @@ class SRTHandler:
 
     @staticmethod
     def canonicalize(text: str) -> str:
+        """Normalizes text for deterministic hashing (NFC, strip BOM/zero-width)."""
         text = unicodedata.normalize("NFC", text)
         text = text.lstrip("\ufeff") # Remove BOM
         for ch in ["\u200b", "\u200c", "\u200d", "\xa0"]:
@@ -76,12 +77,15 @@ class SRTHandler:
 
     @classmethod
     def get_hash(cls, text: str) -> str:
+        """Returns a SHA-256 hash of the canonicalized text."""
         return hashlib.sha256(cls.canonicalize(text).encode("utf-8")).hexdigest()
 
     @classmethod
-    def extract_timestamps(cls, path: Path) -> List[str]:
-        if not path.exists(): return []
-        with open(path, "r", encoding="utf-8") as f:
+    def extract_timestamps(cls, path: Path) -> list[str]:
+        """Extracts all valid timestamp lines from an SRT file."""
+        if not path.exists():
+            return []
+        with open(path, encoding="utf-8") as f:
             return [line.strip() for line in f if "-->" in line and cls.TIMESTAMP_RE.fullmatch(line.strip())]
 
     @staticmethod
@@ -89,7 +93,7 @@ class SRTHandler:
         """Parses SRT content with aggressive cleaning of LLM artifacts."""
         content = re.sub(r"```[a-z]*", "", content)
         content = content.replace("```", "")
-        
+
         blocks = []
         current = {"index": None, "start": None, "end": None, "text": []}
 
@@ -113,10 +117,11 @@ class SRTHandler:
                     # Only strip full-line wrapping quotes (LLM artifact),
                     # preserve legitimate brackets like [Music] and internal quotes
                     clean_line = line.strip()
-                    if len(clean_line) >= 2:
-                        if (clean_line[0] == '"' and clean_line[-1] == '"') or \
-                           (clean_line[0] == "'" and clean_line[-1] == "'"):
-                            clean_line = clean_line[1:-1].strip()
+                    if len(clean_line) >= 2 and (
+                        (clean_line[0] == '"' and clean_line[-1] == '"')
+                        or (clean_line[0] == "'" and clean_line[-1] == "'")
+                    ):
+                        clean_line = clean_line[1:-1].strip()
                     if clean_line:
                         current["text"].append(clean_line)
                 else:
@@ -125,7 +130,7 @@ class SRTHandler:
         # Final check
         if current["index"] is not None and current["start"] is not None:
             blocks.append(current)
-            
+
         return blocks
 
     @staticmethod
@@ -156,10 +161,10 @@ class SRTHandler:
             out.append(f"{i}")
             out.append(f"{b['start']} --> {b['end']}")
             out.append(text_content)
-            out.append("") 
-            
+            out.append("")
+
         return "\n".join(out)
-        
+
     @classmethod
     def standardize(cls, content: str) -> str:
         """
@@ -168,10 +173,10 @@ class SRTHandler:
         """
         # 1. Parse raw string to blocks
         blocks = cls.parse_to_blocks(content)
-        
+
         # 2. Merge consecutive blocks with same text
         merged = cls.merge_identical_blocks(blocks)
-        
+
         # 3. Remove blocks with no text or invalid data, apply clean_text
         cleaned = []
         for b in merged:
@@ -180,10 +185,10 @@ class SRTHandler:
                 # Clean LLM artifacts (bold markers, special chars, extra whitespace)
                 b['text'] = cls.clean_text(text_content)
                 cleaned.append(b)
-        
+
         # 4. Render back to string with fresh indexing (1, 2, 3...)
         return cls.render_blocks(cleaned)
-        
+
     @staticmethod
     def timestamp_to_seconds(ts: str) -> float:
         """Convert SRT timestamp to total seconds."""
@@ -194,14 +199,14 @@ class SRTHandler:
     @classmethod
     def get_blocks_in_range(cls, blocks: list, start_sec: float, end_sec: float, margin: float = 0.05) -> list:
         """Filters blocks that overlap with a specific time range.
-        
+
         Uses overlap logic (not strict containment) so that blocks whose
         timestamps were shifted by standardize/merge across different
         translation streams (S1, L1, Mt) are still captured.
         A small margin (default 50ms) provides additional tolerance.
         """
         return [
-            b for b in blocks 
+            b for b in blocks
             if cls.timestamp_to_seconds(b['start']) <= end_sec + margin
             and cls.timestamp_to_seconds(b['end']) >= start_sec - margin
         ]

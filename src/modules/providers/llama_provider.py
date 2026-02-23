@@ -1,5 +1,7 @@
-import requests
 import logging
+
+import requests
+
 from modules.providers.base_provider import LLMProvider, LLMProviderError
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ class LlamaCPPProvider(LLMProvider):
         payload = {
             "messages": [
                 {
-                    "role": "system", 
+                    "role": "system",
                     "content": content
                 },
                 {"role": "user", "content": prompt}
@@ -39,7 +41,7 @@ class LlamaCPPProvider(LLMProvider):
             if not result or not result.strip():
                 raise LLMProviderError("llama.cpp returned an empty response.")
             return result
-            
+
         except requests.exceptions.RequestException as e:
             raise LLMProviderError(f"Connection error to llama.cpp server: {e}") from e
         except (KeyError, IndexError) as e:

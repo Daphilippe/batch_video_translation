@@ -1,7 +1,7 @@
-import time
 import logging
+import time
 from pathlib import Path
-from typing import Optional
+
 from utils.file_handler import DirectoryMirrorTask
 from utils.srt_handler import SRTHandler
 
@@ -45,18 +45,18 @@ class BaseTranslator(DirectoryMirrorTask):
         if output_file.exists():
             source_ts = SRTHandler.extract_timestamps(input_file)
             target_ts = SRTHandler.extract_timestamps(output_file)
-            
+
             if source_ts == target_ts and len(source_ts) > 0:
                 logger.info(f"[SKIP] {input_file.name} is already translated and matches source structure.")
                 return
             logger.warning(f"[REDO] {input_file.name} structure mismatch or missing. Re-translating...")
 
         # 2. READING CONTENT
-        with open(input_file, "r", encoding="utf-8") as f:
+        with open(input_file, encoding="utf-8") as f:
             content = f.read()
 
         logger.info(f"[TRANSLATING] {input_file.name} using engine: {self.name}...")
-        
+
         # 3. CORE TRANSLATION (Overridden by LLMTranslator or LegacyTranslator)
         start_time = time.time()
         translated_raw = self.translate_logic(content)
@@ -68,9 +68,9 @@ class BaseTranslator(DirectoryMirrorTask):
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(final_standardized)
-        
+
         self.wait_for_stability(output_file)
-        
+
         duration = (time.time() - start_time) / 60
         logger.info(f"[DONE] {output_file.name} in {duration:.2f} minutes.")
 

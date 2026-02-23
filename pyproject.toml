@@ -51,6 +51,16 @@ disable = [
     "R0903",  # too-few-public-methods
     "W1203",  # logging-fstring-interpolation (acceptable in modern Python)
     "C0301",  # line-too-long (handled by ruff formatter)
+    "E0401",  # import-error (external deps not installed in dev)
+    "W0718",  # broad-exception-caught (intentional resilience in pipeline)
+    "R0913",  # too-many-arguments (constructors with many config params)
+    "R0917",  # too-many-positional-arguments
+    "R0914",  # too-many-locals (complex orchestration methods)
+    "R0912",  # too-many-branches
+    "R0915",  # too-many-statements
+    "W0223",  # abstract-method (HybridRefiner uses refine_logic instead)
+    "E1136",  # unsubscriptable-object (false positive on typed dicts)
+    "E1137",  # unsupported-assignment-operation (false positive on typed dicts)
 ]
 
 [tool.pylint.format]

@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+
 from utils.file_handler import DirectoryMirrorTask
 from utils.srt_handler import SRTHandler
 
@@ -16,7 +17,7 @@ class SRTOptimizer(DirectoryMirrorTask):
     def process_file(self, input_file: Path) -> None:
         output_file = self.get_output_path(input_file, ".srt")
 
-        with open(input_file, "r", encoding="utf-8") as f:
+        with open(input_file, encoding="utf-8") as f:
             content = f.read()
 
         # Apply the full conditioning immediately

@@ -4,21 +4,19 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
 
 # --- Pipeline modules ---
 from modules.extractor import AudioExtractor
-from modules.transcriber import WhisperTranscriber
-from modules.srt_optimizer import SRTOptimizer
-from modules.llm_translator import LLMTranslator
 from modules.legacy_translator import LegacyTranslator
-from modules.strategies.hybrid_refiner import HybridRefiner
-from modules.translator import BaseTranslator
+from modules.llm_translator import LLMTranslator
 
 # --- LLM providers ---
 from modules.providers.copilot_ui import CopilotUIProvider
 from modules.providers.llama_provider import LlamaCPPProvider
-
+from modules.srt_optimizer import SRTOptimizer
+from modules.strategies.hybrid_refiner import HybridRefiner
+from modules.transcriber import WhisperTranscriber
+from modules.translator import BaseTranslator
 
 # --- Logging ---
 logging.basicConfig(
@@ -45,15 +43,15 @@ class VideoTranslationPipeline:
     def __init__(self, output_dir: str, config_path: str = "configs/settings.json"):
         logger.info("--- Initializing Pipeline ---")
         logger.info(f"Loading configuration from: {config_path}")
-        
+
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 self.config = json.load(f)
-        except FileNotFoundError:
-            raise ValueError(f"Configuration file not found: '{config_path}'")
+        except FileNotFoundError as exc:
+            raise ValueError(f"Configuration file not found: '{config_path}'") from exc
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in configuration file '{config_path}': {e}")
-        
+            raise ValueError(f"Invalid JSON in configuration file '{config_path}': {e}") from e
+
         self._validate_config()
         self._validate_binaries()
         self.final_output = Path(output_dir)
@@ -69,8 +67,8 @@ class VideoTranslationPipeline:
             "llm_mt":     self.work_dir / "5_llm_mt",        # Mt (LLM draft)
             "final":      self.final_output / "subtitles_ready",
         }
-        
-        for name, path in self.dirs.items():
+
+        for _name, path in self.dirs.items():
             path.mkdir(parents=True, exist_ok=True)
 
     def _validate_config(self) -> None:
@@ -93,14 +91,14 @@ class VideoTranslationPipeline:
             raise FileNotFoundError(
                 "FFmpeg not found in PATH. Install it and ensure it's accessible."
             )
-        
+
         # Validate Whisper binary
         whisper_bin = Path(self.config["whisper"]["bin_path"])
         if not whisper_bin.exists():
             raise FileNotFoundError(
                 f"Whisper binary not found at: {whisper_bin}"
             )
-        
+
         # Validate Whisper model
         model_path = Path(self.config["whisper"]["model_path"])
         if not model_path.exists():
@@ -117,6 +115,7 @@ class VideoTranslationPipeline:
         return len([f for f in path.iterdir() if f.suffix.lower() in extension])
 
     def run(self, input_dir, mode="full", engine="llm"):
+        """Runs the full transcription/translation pipeline."""
         input_path = Path(input_dir)
         if not input_path.exists():
             logger.error(f"Input directory not found: {input_path}")
@@ -260,7 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="configs/settings.json", help="Path to configuration file")
     parser.add_argument("--mode", default="full", choices=["full", "extract", "transcribe", "optimize", "translate"])
     parser.add_argument("--engine", default="legacy", choices=["llm-local","llm-ui", "legacy", "hybrid"])
-    
+
     args = parser.parse_args()
     pipeline = VideoTranslationPipeline(output_dir=args.output, config_path=args.config)
     try:
@@ -268,4 +267,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.warning("\nProcess interrupted by user (Ctrl+C).")
     except Exception as e:
-        logger.error(f"A critical error occurred: {str(e)}", exc_info=True)
+        logger.error(f"A critical error occurred: {e!s}", exc_info=True)

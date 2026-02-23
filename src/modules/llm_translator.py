@@ -1,10 +1,10 @@
 import logging
 import time
 from pathlib import Path
-from typing import List, Dict, Optional
+
+from modules.providers.base_provider import LLMProvider
 from modules.translator import BaseTranslator
 from utils.srt_handler import SRTHandler
-from modules.providers.base_provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ class LLMTranslator(BaseTranslator):
     and reassembles the result. Works through BaseTranslator.process_file() which
     handles skip logic, standardization, and wait_for_stability.
     """
-    def __init__(self, input_dir: str, output_dir: str, provider: LLMProvider, config: Dict):
+    def __init__(self, input_dir: str, output_dir: str, provider: LLMProvider, config: dict):
         super().__init__(input_dir, output_dir, extensions=(".srt",))
         self.provider = provider
         self.config = config
@@ -23,28 +23,28 @@ class LLMTranslator(BaseTranslator):
         self.name = provider.name if hasattr(provider, 'name') else "LLM"
         self.system_instructions = self._load_custom_prompt(config)
 
-    def _load_custom_prompt(self, config: Dict) -> str:
+    def _load_custom_prompt(self, config: dict) -> str:
         """Reads the prompt from a text file and formats it with languages."""
         prompt_path = Path(config.get("prompt_file", "configs/system_prompt.txt"))
         if not prompt_path.exists():
             logger.warning(f"Prompt file not found at {prompt_path}. Using fallback.")
             raw_prompt = "Translate from {source_lang} to {target_lang}:"
         else:
-            with open(prompt_path, "r", encoding="utf-8") as f:
+            with open(prompt_path, encoding="utf-8") as f:
                 raw_prompt = f.read()
-        
+
         return raw_prompt.format(
             source_lang=config.get("source_lang", "English"),
             target_lang=config.get("target_lang", "French")
         )
 
-    def _split_into_chunks(self, blocks: List[Dict]) -> List[List[Dict]]:
+    def _split_into_chunks(self, blocks: list[dict]) -> list[list[dict]]:
         """Groups SRT blocks into manageable chunks for the LLM context window."""
         return [blocks[i : i + self.chunk_size] for i in range(0, len(blocks), self.chunk_size)]
 
-    def translate_logic(self, content: str) -> str:
+    def translate_logic(self, text: str) -> str:
         """Core orchestration: SRT -> Blocks -> Chunks -> LLM -> Merged SRT"""
-        all_blocks = SRTHandler.parse_to_blocks(content)
+        all_blocks = SRTHandler.parse_to_blocks(text)
         chunks = self._split_into_chunks(all_blocks)
 
         translated_full_blocks = []

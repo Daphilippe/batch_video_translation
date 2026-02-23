@@ -1,7 +1,8 @@
-import subprocess
-import shutil
 import logging
+import shutil
+import subprocess
 from pathlib import Path
+
 from utils.file_handler import DirectoryMirrorTask
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ class AudioExtractor(DirectoryMirrorTask):
         super().__init__(input_dir, output_dir, extensions)
         self.sample_rate = "16000"
         self.segment_time = segment_time
-        
+
         # Validate FFmpeg availability
         if not shutil.which("ffmpeg"):
             raise FileNotFoundError("FFmpeg not found in PATH. Install it and ensure it's accessible.")
@@ -31,7 +32,7 @@ class AudioExtractor(DirectoryMirrorTask):
 
         # Output pattern: part000.wav, part001.wav, etc.
         output_pattern = video_output_dir / "part%03d.wav"
-        
+
         # Check if the first segment already exists to prevent redundant processing.
         if (video_output_dir / "part000.wav").exists():
             logger.info(f"Segments already exist for: {input_file.name}")
@@ -47,7 +48,7 @@ class AudioExtractor(DirectoryMirrorTask):
             "-c:a", "pcm_s16le",             # Uncompressed 16-bit WAV format
             str(output_pattern)
         ]
-        
+
         try:
             # We use capture_output to keep the logs clean unless an error occurs
             subprocess.run(cmd, check=True, capture_output=True)

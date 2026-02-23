@@ -1,7 +1,6 @@
+import logging
 import os
 from pathlib import Path
-from typing import Tuple
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ class DirectoryMirrorTask:
     relative path structure under ``output_dir``, and delegates each file
     to the subclass's ``process_file()`` implementation.
     """
-    def __init__(self, input_dir: str, output_dir: str, extensions: Tuple[str, ...]):
+    def __init__(self, input_dir: str, output_dir: str, extensions: tuple[str, ...]):
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.extensions = extensions
