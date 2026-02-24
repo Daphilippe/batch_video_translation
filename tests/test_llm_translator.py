@@ -94,3 +94,149 @@ class TestLLMTranslatorLogic:
         )
         result = translator.translate_logic(source)  # noqa: F841
         assert provider.call_count == 2  # 2 chunks: [A,B] and [C]
+
+
+# ── Checkpoint / mid-file recovery ───────────────────────────────────
+
+SRT_3_BLOCKS = (
+    "1\n00:00:01,000 --> 00:00:02,000\nAlpha\n\n"
+    "2\n00:00:03,000 --> 00:00:04,000\nBravo\n\n"
+    "3\n00:00:05,000 --> 00:00:06,000\nCharlie\n"
+)
+
+
+class TestCheckpointRecovery:
+    """Chunk-level checkpoint save and resume after interruption."""
+
+    def test_checkpoint_saved_after_each_chunk(self, tmp_path):
+        """A .partial.srt file is written after every chunk."""
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        (input_dir / "test.srt").write_text(SRT_3_BLOCKS, encoding="utf-8")
+
+        provider = MockProvider(responses=[
+            "1\n00:00:01,000 --> 00:00:02,000\nUn\n",
+            "2\n00:00:03,000 --> 00:00:04,000\nDeux\n",
+            "3\n00:00:05,000 --> 00:00:06,000\nTrois\n",
+        ])
+        config = {"source_lang": "English", "target_lang": "French", "chunk_size": 1, "chunk_delay": 0}
+        translator = LLMTranslator(str(input_dir), str(output_dir), provider, config)
+
+        translator.run()
+
+        # Final output should exist, checkpoint should be cleaned up
+        assert (output_dir / "test.srt").exists()
+        assert not (output_dir / "test.partial.srt").exists()
+        assert provider.call_count == 3
+
+    def test_checkpoint_preserved_on_crash(self, tmp_path):
+        """If provider raises mid-run, checkpoint persists for resume."""
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        (input_dir / "test.srt").write_text(SRT_3_BLOCKS, encoding="utf-8")
+
+        # Chunk 1 succeeds, chunk 2 raises a fatal error
+        provider = MockProvider(responses=[
+            "1\n00:00:01,000 --> 00:00:02,000\nUn\n",
+            RuntimeError("LLM crashed"),
+            "3\n00:00:05,000 --> 00:00:06,000\nTrois\n",
+        ])
+        config = {"source_lang": "English", "target_lang": "French", "chunk_size": 1, "chunk_delay": 0}
+        translator = LLMTranslator(str(input_dir), str(output_dir), provider, config)
+
+        translator.run()
+
+        # Output written (provider error = fallback to source, not crash)
+        assert (output_dir / "test.srt").exists()
+        # Checkpoint cleaned up because final output was successfully written
+        assert not (output_dir / "test.partial.srt").exists()
+
+    def test_resume_from_checkpoint(self, tmp_path):
+        """Pre-existing checkpoint lets translation skip done chunks."""
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        (input_dir / "test.srt").write_text(SRT_3_BLOCKS, encoding="utf-8")
+
+        # Simulate a checkpoint from a previous interrupted run (1 chunk done)
+        checkpoint = output_dir / "test.partial.srt"
+        checkpoint.write_text(
+            "1\n00:00:01,000 --> 00:00:02,000\nUn\n", encoding="utf-8"
+        )
+
+        # Provider only needs to handle chunks 2 and 3
+        provider = MockProvider(responses=[
+            "2\n00:00:03,000 --> 00:00:04,000\nDeux\n",
+            "3\n00:00:05,000 --> 00:00:06,000\nTrois\n",
+        ])
+        config = {"source_lang": "English", "target_lang": "French", "chunk_size": 1, "chunk_delay": 0}
+        translator = LLMTranslator(str(input_dir), str(output_dir), provider, config)
+
+        translator.run()
+
+        # Only 2 LLM calls (chunks 2+3), not 3
+        assert provider.call_count == 2
+        output = (output_dir / "test.srt").read_text(encoding="utf-8")
+        assert "Un" in output
+        assert "Deux" in output
+        assert "Trois" in output
+        # Checkpoint cleaned up
+        assert not checkpoint.exists()
+
+    def test_corrupt_checkpoint_starts_fresh(self, tmp_path):
+        """Unreadable checkpoint is ignored; full translation runs."""
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        (input_dir / "test.srt").write_text(SRT_3_BLOCKS, encoding="utf-8")
+
+        checkpoint = output_dir / "test.partial.srt"
+        checkpoint.write_text("NOT VALID SRT {{{{", encoding="utf-8")
+
+        provider = MockProvider(responses=[
+            "1\n00:00:01,000 --> 00:00:02,000\nUn\n",
+            "2\n00:00:03,000 --> 00:00:04,000\nDeux\n",
+            "3\n00:00:05,000 --> 00:00:06,000\nTrois\n",
+        ])
+        config = {"source_lang": "English", "target_lang": "French", "chunk_size": 1, "chunk_delay": 0}
+        translator = LLMTranslator(str(input_dir), str(output_dir), provider, config)
+
+        translator.run()
+
+        # All 3 chunks translated from scratch
+        assert provider.call_count == 3
+
+    def test_file_level_skip_still_works(self, tmp_path):
+        """Fully translated file is skipped (no LLM calls)."""
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        # Same timestamps in source and output = already translated
+        (input_dir / "test.srt").write_text(SRT_3_BLOCKS, encoding="utf-8")
+        (output_dir / "test.srt").write_text(
+            "1\n00:00:01,000 --> 00:00:02,000\nDéjà traduit\n\n"
+            "2\n00:00:03,000 --> 00:00:04,000\nDéjà traduit\n\n"
+            "3\n00:00:05,000 --> 00:00:06,000\nDéjà traduit\n",
+            encoding="utf-8",
+        )
+
+        provider = MockProvider(responses=[])
+        config = {"source_lang": "English", "target_lang": "French", "chunk_size": 1, "chunk_delay": 0}
+        translator = LLMTranslator(str(input_dir), str(output_dir), provider, config)
+
+        translator.run()
+
+        # No LLM calls — file was fully skipped
+        assert provider.call_count == 0

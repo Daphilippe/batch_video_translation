@@ -11,12 +11,12 @@ from modules.legacy_translator import LegacyTranslator
 from modules.llm_translator import LLMTranslator
 
 # --- LLM providers ---
-from modules.providers.copilot_ui import CopilotUIProvider
 from modules.providers.llama_provider import LlamaCPPProvider
 from modules.srt_optimizer import SRTOptimizer
 from modules.strategies.hybrid_refiner import HybridRefiner
 from modules.transcriber import WhisperTranscriber
 from modules.translator import BaseTranslator
+from utils.srt_handler import SRTHandler
 
 # --- Logging ---
 logging.basicConfig(
@@ -70,8 +70,6 @@ class VideoTranslationPipeline:
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in configuration file '{config_path}': {e}") from e
 
-        self._validate_config()
-        self._validate_binaries()
         self.final_output = Path(output_dir)
         self.work_dir = self.final_output / "internals"
 
@@ -89,58 +87,77 @@ class VideoTranslationPipeline:
         for _name, path in self.dirs.items():
             path.mkdir(parents=True, exist_ok=True)
 
-    def _validate_config(self) -> None:
+    def _validate_requirements(self, mode: str, engine: str) -> None:
         """
-        Validate that required configuration sections and keys exist.
+        Validate config sections and external binaries for the selected mode and engine.
+
+        Only checks the requirements actually needed for the given
+        pipeline scope (mode) and translation backend (engine),
+        allowing each engine to run independently without requiring
+        config or binaries for unused components.
+
+        Parameters
+        ----------
+        mode : str
+            Pipeline scope (``"full"``, ``"extract"``, ``"transcribe"``,
+            ``"optimize"``, ``"translate"``).
+        engine : str
+            Translation engine (``"legacy"``, ``"llm-local"``,
+            ``"llm-ui"``, ``"hybrid"``).
 
         Raises
         ------
         ValueError
-            If a required section or key is missing from the
-            loaded configuration dict.
-        """
-        required_keys = {
-            "whisper": ["bin_path", "model_path"],
-            "llm_config": ["source_lang", "target_lang"],
-        }
-        for section, keys in required_keys.items():
-            if section not in self.config:
-                raise ValueError(f"Missing required config section: '{section}'")
-            for key in keys:
-                if key not in self.config[section]:
-                    raise ValueError(f"Missing required config key: '{section}.{key}'")
-
-    def _validate_binaries(self) -> None:
-        """
-        Validate that required external binaries are accessible.
-
-        Checks for FFmpeg in ``PATH``, and the Whisper binary and
-        model at the paths specified in the configuration.
-
-        Raises
-        ------
+            If a required config section or key is missing.
         FileNotFoundError
-            If any required binary or model file cannot be located.
+            If required external binaries are not found.
         """
-        # Validate FFmpeg
-        if not shutil.which("ffmpeg"):
+        # Steps 1 (extract) needs FFmpeg
+        if mode in ("full", "extract") and not shutil.which("ffmpeg"):
             raise FileNotFoundError(
                 "FFmpeg not found in PATH. Install it and ensure it's accessible."
             )
 
-        # Validate Whisper binary
-        whisper_bin = Path(self.config["whisper"]["bin_path"])
-        if not whisper_bin.exists():
-            raise FileNotFoundError(
-                f"Whisper binary not found at: {whisper_bin}"
-            )
+        # Step 2 (transcribe) needs Whisper config + binaries
+        if mode in ("full", "transcribe"):
+            self._validate_config_section("whisper", ["bin_path", "model_path"])
 
-        # Validate Whisper model
-        model_path = Path(self.config["whisper"]["model_path"])
-        if not model_path.exists():
-            raise FileNotFoundError(
-                f"Whisper model file not found at: {model_path}"
-            )
+            whisper_bin = Path(self.config["whisper"]["bin_path"])
+            if not whisper_bin.exists():
+                raise FileNotFoundError(f"Whisper binary not found at: {whisper_bin}")
+
+            model_path = Path(self.config["whisper"]["model_path"])
+            if not model_path.exists():
+                raise FileNotFoundError(f"Whisper model file not found at: {model_path}")
+
+        # Step 4 (translate) needs engine-specific config
+        if mode in ("full", "translate"):
+            if engine in ("llm-local", "llm-ui", "hybrid"):
+                self._validate_config_section("llm_config", ["source_lang", "target_lang"])
+            if engine in ("legacy", "hybrid"):
+                self._validate_config_section("translation", ["source_lang", "target_lang", "cache_file"])
+
+    def _validate_config_section(self, section: str, keys: list[str]) -> None:
+        """
+        Validate that a configuration section exists with the required keys.
+
+        Parameters
+        ----------
+        section : str
+            Top-level section name in the config dict.
+        keys : list of str
+            Required keys within the section.
+
+        Raises
+        ------
+        ValueError
+            If the section or any required key is missing.
+        """
+        if section not in self.config:
+            raise ValueError(f"Missing required config section: '{section}'")
+        for key in keys:
+            if key not in self.config[section]:
+                raise ValueError(f"Missing required config key: '{section}.{key}'")
 
     def _get_file_count(self, path, extension):
         """
@@ -165,7 +182,7 @@ class VideoTranslationPipeline:
             return len([d for d in path.iterdir() if d.is_dir()])
         return len([f for f in path.iterdir() if f.suffix.lower() in extension])
 
-    def run(self, input_dir, mode="full", engine="llm"):
+    def run(self, input_dir, mode="full", engine="legacy"):
         """
         Run the transcription / translation pipeline.
 
@@ -177,14 +194,15 @@ class VideoTranslationPipeline:
             Pipeline scope: ``"full"`` (default), ``"extract"``,
             ``"transcribe"``, ``"optimize"``, or ``"translate"``.
         engine : str, optional
-            Translation engine to use: ``"llm"`` (default),
-            ``"llm-local"``, ``"llm-ui"``, ``"legacy"``, or
-            ``"hybrid"``.
+            Translation engine to use: ``"legacy"`` (default),
+            ``"llm-local"``, ``"llm-ui"``, or ``"hybrid"``.
         """
         input_path = Path(input_dir)
         if not input_path.exists():
             logger.error(f"Input directory not found: {input_path}")
             return
+
+        self._validate_requirements(mode, engine)
 
         seg_time = self.config.get("whisper", {}).get("segment_time", 600)
         logger.info(f"Starting pipeline in '{mode}' mode using '{engine}' engine.")
@@ -233,6 +251,52 @@ class VideoTranslationPipeline:
 
         logger.info("✨ ALL PIPELINE TASKS FINISHED SUCCESSFULLY! ✨")
 
+    def _seed_mt_from_previous_run(self) -> None:
+        """Copy previous engine output to Mt directory for hybrid reuse.
+
+        When a previous non-hybrid engine run (e.g. ``llm-local``)
+        produced files in the final output directory, those can serve
+        as the Mt (LLM draft) input for the hybrid refiner.  This
+        avoids re-translating files that were already processed.
+
+        Only seeds when the Mt directory (``5_llm_mt/``) contains no
+        SRT files and the final directory (``subtitles_ready/``) has
+        files whose timestamps match their S1 source.
+        """
+        mt_dir = self.dirs["llm_mt"]
+        final_dir = self.dirs["final"]
+        s1_dir = self.dirs["clean_srt"]
+
+        if any(mt_dir.rglob("*.srt")):
+            return  # Mt already populated — skip seeding
+
+        final_files = list(final_dir.rglob("*.srt"))
+        if not final_files:
+            return
+
+        seeded = 0
+        for final_file in final_files:
+            relative = final_file.relative_to(final_dir)
+            s1_file = s1_dir / relative
+            mt_target = mt_dir / relative
+
+            if not s1_file.exists():
+                continue
+
+            s1_ts = SRTHandler.extract_timestamps(s1_file)
+            final_ts = SRTHandler.extract_timestamps(final_file)
+
+            if s1_ts == final_ts and len(s1_ts) > 0:
+                mt_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(final_file, mt_target)
+                seeded += 1
+
+        if seeded:
+            logger.info(
+                f"Seeded {seeded} Mt file(s) from previous translation output. "
+                f"LLM draft step will skip these files."
+            )
+
     def _run_hybrid_pipeline(self):
         """
         Execute the full hybrid protocol.
@@ -240,8 +304,15 @@ class VideoTranslationPipeline:
         Sequentially generates L1 (literal via ``LegacyTranslator``),
         Mt (LLM draft via ``LLMTranslator``), then runs the
         ``HybridRefiner`` for triple-source arbitration.
+
+        If a previous engine run left files in the final output
+        directory, they are seeded into the Mt directory so the LLM
+        draft step can skip already-translated files.
         """
         logger.info("Starting Hybrid Protocol (Arbitration S1/L1/Mt)...")
+
+        # 0. Seed Mt from previous non-hybrid run (e.g. llm-local)
+        self._seed_mt_from_previous_run()
 
         # A. Generate L1 (Literal translation via Legacy)
         logger.info("Generating L1 (Literal)...")
@@ -254,7 +325,8 @@ class VideoTranslationPipeline:
 
         # B. Generate Mt (LLM Draft)
         logger.info("Generating Mt (LLM Draft)...")
-        provider = LlamaCPPProvider()
+        llm_url = self.config.get("llm_config", {}).get("server_url", "http://127.0.0.1:8080")
+        provider = LlamaCPPProvider(url=llm_url)
         llm_config = self.config.get("llm_config", self.config.get("translation", {}))
         llm_draft = LLMTranslator(
             input_dir=str(self.dirs["clean_srt"]),
@@ -322,7 +394,8 @@ class VideoTranslationPipeline:
             Translator configured with ``LlamaCPPProvider``.
         """
         logger.info("Initializing Local LLM Provider (llama.cpp)...")
-        provider = LlamaCPPProvider()
+        llm_url = self.config.get("llm_config", {}).get("server_url", "http://127.0.0.1:8080")
+        provider = LlamaCPPProvider(url=llm_url)
         return LLMTranslator(
             input_dir=str(self.dirs["clean_srt"]),
             output_dir=str(self.dirs["final"]),
@@ -334,12 +407,23 @@ class VideoTranslationPipeline:
         """
         Create an ``LLMTranslator`` backed by browser UI automation.
 
+        Imports ``CopilotUIProvider`` lazily so that Windows-only
+        dependencies (``pywinauto``, ``win32api``) are not required
+        unless this engine is actually selected.
+
         Returns
         -------
         LLMTranslator
             Translator configured with ``CopilotUIProvider``.
+
+        Raises
+        ------
+        ImportError
+            If required UI automation packages are not installed.
         """
         logger.info("Initializing UI Automation Provider...")
+        from modules.providers.copilot_ui import CopilotUIProvider  # pylint: disable=import-outside-toplevel
+
         provider = CopilotUIProvider(window_title="Edge")
         return LLMTranslator(
             input_dir=str(self.dirs["clean_srt"]),

@@ -5,10 +5,13 @@ import re
 import time
 from pathlib import Path
 
-from deep_translator import GoogleTranslator
-
 from modules.translator import BaseTranslator
 from utils.srt_handler import SRTHandler
+
+try:
+    from deep_translator import GoogleTranslator
+except ImportError:
+    GoogleTranslator = None  # Checked at init time; allows non-legacy engines to load
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,12 @@ class LegacyTranslator(BaseTranslator):
     def __init__(self, input_dir: str, output_dir: str, config: dict):
         self.config = config
         super().__init__(input_dir, output_dir, extensions=(".srt",))
+
+        if GoogleTranslator is None:
+            raise ImportError(
+                "deep_translator is required for the legacy (Google) engine. "
+                "Install it with: pip install deep-translator"
+            )
 
         self.translator = GoogleTranslator(
             source=self.config["translation"]["source_lang"],

@@ -58,6 +58,10 @@ class SRTHandler:
         td = timedelta(hours=h, minutes=m, seconds=s, milliseconds=ms)
         new_td = td + timedelta(seconds=offset_seconds)
 
+        # Clamp to zero — negative timestamps are invalid in SRT
+        if new_td.total_seconds() < 0:
+            return "00:00:00,000"
+
         # Extract new components
         total_seconds = int(new_td.total_seconds())
         new_h = total_seconds // 3600
