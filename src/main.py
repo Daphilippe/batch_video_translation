@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("VideoPipeline")
 
-class VideoTranslationPipeline:
+class VideoTranslationPipeline:  # pylint: disable=too-few-public-methods
     """Main orchestrator for the 4-step video translation pipeline.
 
     Steps
@@ -222,10 +222,12 @@ class VideoTranslationPipeline:
             transcriber = WhisperTranscriber(
                 input_dir=str(self.dirs["audio"]),
                 output_dir=str(self.dirs["raw_srt"]),
-                whisper_bin=self.config["whisper"]["bin_path"],
-                model_path=self.config["whisper"]["model_path"],
-                lang=self.config["whisper"].get("lang", "auto"),
-                segment_time=seg_time
+                config={
+                    "bin_path": self.config["whisper"]["bin_path"],
+                    "model_path": self.config["whisper"]["model_path"],
+                    "lang": self.config["whisper"].get("lang", "auto"),
+                    "segment_time": seg_time,
+                }
             )
             transcriber.run()
 
@@ -339,9 +341,11 @@ class VideoTranslationPipeline:
                           self.config.get("translation", {}).get("chunk_size", 10)),
         }
         refiner = HybridRefiner(
-            s1_dir=str(self.dirs["clean_srt"]),
-            l1_dir=str(self.dirs["legacy_mt"]),
-            mt_dir=str(self.dirs["llm_mt"]),
+            source_dirs={
+                "s1": str(self.dirs["clean_srt"]),
+                "l1": str(self.dirs["legacy_mt"]),
+                "mt": str(self.dirs["llm_mt"]),
+            },
             output_dir=str(self.dirs["final"]),
             provider=provider,
             config=refiner_config
@@ -457,5 +461,5 @@ if __name__ == "__main__":
         pipeline.run(input_dir=args.input, mode=args.mode, engine=args.engine)
     except KeyboardInterrupt:
         logger.warning("\nProcess interrupted by user (Ctrl+C).")
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error(f"A critical error occurred: {e!s}", exc_info=True)

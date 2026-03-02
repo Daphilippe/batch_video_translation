@@ -41,11 +41,7 @@ data/translation_cache.json
 *.bin
 *.exe
 
-# IDE
-.vscode/*
-!.vscode/tasks.json
-!.vscode/extensions.json
-
 # OS
 .DS_Store
 Thumbs.db
+/.ai/memory/*

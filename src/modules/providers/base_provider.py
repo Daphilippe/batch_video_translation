@@ -13,7 +13,7 @@ class LLMProviderError(Exception):
     """
 
 
-class LLMProvider(ABC):
+class LLMProvider(ABC):  # pylint: disable=too-few-public-methods
     """Abstract base class for LLM backends.
 
     Every provider must implement ``ask(content, prompt) -> str``.

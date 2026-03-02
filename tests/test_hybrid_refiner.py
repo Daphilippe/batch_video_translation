@@ -1,4 +1,5 @@
 from helpers import MockProvider
+from modules.providers.base_provider import LLMProviderError
 from modules.strategies.hybrid_refiner import HybridRefiner
 from utils.srt_handler import SRTHandler
 
@@ -55,9 +56,7 @@ def _make_refiner(provider, chunk_size=10, chunk_delay=0):
         "refinement_protocol_file": "nonexistent.txt",  # triggers fallback
     }
     return HybridRefiner(
-        s1_dir="/dummy/s1",
-        l1_dir="/dummy/l1",
-        mt_dir="/dummy/mt",
+        source_dirs={"s1": "/dummy/s1", "l1": "/dummy/l1", "mt": "/dummy/mt"},
         output_dir="/dummy/out",
         provider=provider,
         config=config,
@@ -338,7 +337,7 @@ Salut
 
     def test_llm_error_falls_back_to_s1(self):
         """Provider error → S1 source blocks are kept."""
-        provider = MockProvider(responses=[Exception("LLM down")])
+        provider = MockProvider(responses=[LLMProviderError("LLM down")])
         refiner = _make_refiner(provider, chunk_size=10, chunk_delay=0)
 
         result = refiner.refine_logic(S1_SRT, L1_SRT, MT_SRT)
@@ -497,12 +496,10 @@ class TestHybridRefinerProcessFile:
 
         config = {"chunk_size": 10, "chunk_delay": 0, "refinement_protocol_file": "nonexistent.txt"}
         refiner = HybridRefiner(
-            str(s1_dir),
-            str(l1_dir),
-            str(mt_dir),
-            str(out_dir),
-            provider,
-            config,
+            source_dirs={"s1": str(s1_dir), "l1": str(l1_dir), "mt": str(mt_dir)},
+            output_dir=str(out_dir),
+            provider=provider,
+            config=config,
         )
         refiner.process_file(s1_dir / "video.srt")
 
@@ -522,12 +519,10 @@ class TestHybridRefinerProcessFile:
         provider = MockProvider()
         config = {"chunk_size": 10, "chunk_delay": 0}
         refiner = HybridRefiner(
-            str(s1_dir),
-            str(l1_dir),
-            str(mt_dir),
-            str(out_dir),
-            provider,
-            config,
+            source_dirs={"s1": str(s1_dir), "l1": str(l1_dir), "mt": str(mt_dir)},
+            output_dir=str(out_dir),
+            provider=provider,
+            config=config,
         )
         refiner.process_file(s1_dir / "video.srt")
 
@@ -548,12 +543,10 @@ class TestHybridRefinerProcessFile:
         provider = MockProvider()
         config = {"chunk_size": 10, "chunk_delay": 0, "refinement_protocol_file": "nonexistent.txt"}
         refiner = HybridRefiner(
-            str(s1_dir),
-            str(l1_dir),
-            str(mt_dir),
-            str(out_dir),
-            provider,
-            config,
+            source_dirs={"s1": str(s1_dir), "l1": str(l1_dir), "mt": str(mt_dir)},
+            output_dir=str(out_dir),
+            provider=provider,
+            config=config,
         )
         refiner.process_file(s1_dir / "video.srt")
 

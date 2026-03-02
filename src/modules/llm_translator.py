@@ -2,7 +2,7 @@ import logging
 import time
 from pathlib import Path
 
-from modules.providers.base_provider import LLMProvider
+from modules.providers.base_provider import LLMProvider, LLMProviderError
 from modules.translator import BaseTranslator
 from utils.srt_handler import SRTHandler
 
@@ -157,7 +157,7 @@ class LLMTranslator(BaseTranslator):
 
         try:
             raw_response = self.provider.ask(self.system_instructions, prompt)
-        except Exception as e:
+        except LLMProviderError as e:
             logger.error(f"Chunk {idx}: Provider error: {e}. Keeping source text.")
             return list(chunk)
 
@@ -190,7 +190,7 @@ class LLMTranslator(BaseTranslator):
                 return list(chunk)
 
             return translated_blocks
-        except Exception as e:
+        except (ValueError, IndexError) as e:
             logger.error(f"Failed to parse LLM response for chunk {idx}: {e}")
             return list(chunk)
 
@@ -209,7 +209,7 @@ class LLMTranslator(BaseTranslator):
             self._checkpoint_file.write_text(
                 SRTHandler.render_blocks(blocks), encoding="utf-8"
             )
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Failed to save checkpoint: {e}")
 
     def _load_checkpoint(self, total_source_blocks: int) -> tuple[list[dict], int]:
@@ -255,7 +255,7 @@ class LLMTranslator(BaseTranslator):
                 )
 
             return recovered, resume_from
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.warning(f"Failed to read checkpoint: {e}. Starting fresh.")
             return [], 0
 

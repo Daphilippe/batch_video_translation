@@ -1,12 +1,39 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "video-translation-pipeline"
 version = "0.2.0"
 description = "Automated video transcription and translation pipeline with hybrid LLM arbitration"
+readme = "readme.md"
+license = { text = "MIT" }
 requires-python = ">=3.9"
+dependencies = [
+    # Translation & Text
+    "deep-translator>=1.11",
+    "regex>=2023.0",
+    "requests>=2.28",
+    "pyperclip>=1.8",
+    # System
+    "python-dotenv>=1.0",
+    "tqdm>=4.60",
+    # Windows-only (UI automation)
+    "pywinauto>=0.6.8; sys_platform == 'win32'",
+    "pywin32>=300; sys_platform == 'win32'",
+    "pypiwin32>=223; sys_platform == 'win32'",
+    "keyboard>=0.13; sys_platform == 'win32'",
+    "mouse>=0.7; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "pylint",
+    "pytest",
+    "pytest-cov",
+    "pip-tools",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -43,24 +70,15 @@ known-first-party = ["modules", "utils"]
 [tool.pylint.main]
 source-roots = ["src"]
 ignore-paths = ["tests/__pycache__", "src/utils/__pycache__"]
+extension-pkg-allow-list = ["win32api"]
 
 [tool.pylint."messages control"]
 disable = [
-    "C0114",  # missing-module-docstring
-    "C0115",  # missing-class-docstring (we enforce via ruff D)
-    "R0903",  # too-few-public-methods
-    "W1203",  # logging-fstring-interpolation (acceptable in modern Python)
+    "C0114",  # missing-module-docstring (not required by convention)
+    "C0115",  # missing-class-docstring (enforced by convention, not pylint)
     "C0301",  # line-too-long (handled by ruff formatter)
-    "E0401",  # import-error (external deps not installed in dev)
-    "W0718",  # broad-exception-caught (intentional resilience in pipeline)
-    "R0913",  # too-many-arguments (constructors with many config params)
-    "R0917",  # too-many-positional-arguments
-    "R0914",  # too-many-locals (complex orchestration methods)
-    "R0912",  # too-many-branches
-    "R0915",  # too-many-statements
-    "W0223",  # abstract-method (HybridRefiner uses refine_logic instead)
-    "E1136",  # unsubscriptable-object (false positive on typed dicts)
-    "E1137",  # unsupported-assignment-operation (false positive on typed dicts)
+    "W1203",  # logging-fstring-interpolation (acceptable in modern Python)
+    "E0401",  # import-error (external deps not always installed in dev)
 ]
 
 [tool.pylint.format]

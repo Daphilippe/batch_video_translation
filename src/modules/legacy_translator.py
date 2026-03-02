@@ -75,7 +75,7 @@ class LegacyTranslator(BaseTranslator):
             try:
                 with open(self.cache_path, encoding="utf-8") as f:
                     return json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                 logger.error(f"Failed to load cache: {e}")
         return {}
 
@@ -141,7 +141,7 @@ class LegacyTranslator(BaseTranslator):
             if not result:
                 return []
             return [res.strip() for res in result.split(" ||| ")]
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             if "429" in str(e):
                 if _retries >= max_retries:
                     logger.error(f"Max retries ({max_retries}) exceeded for batch. Skipping.")
@@ -152,6 +152,122 @@ class LegacyTranslator(BaseTranslator):
                 return self._safe_translate_batch(batch, _retries + 1)
             logger.error(f"Translation error: {e}")
             return []
+
+    def _separate_cached_lines(self, lines: list[str]) -> tuple[list, list]:
+        """Separate structural/cached lines from lines needing translation.
+
+        Analyzes each line: structural lines (indices, timestamps, blanks)
+        and already-cached translations are placed directly; remaining
+        lines are queued for batch translation.
+
+        Parameters
+        ----------
+        lines : list of str
+            Raw SRT file lines.
+
+        Returns
+        -------
+        final_lines : list
+            Line slots (``str`` for resolved, ``None`` for pending).
+        to_translate : list of tuple
+            Pending entries as ``(slot_index, pre-treated_text, hash, original_text)``.
+        """
+        final_lines: list = []
+        to_translate: list[tuple] = []
+
+        for line in lines:
+            clean = line.strip()
+            if re.match(r"^[0-9]+$", clean) or "-->" in clean or not clean:
+                final_lines.append(line)
+            else:
+                l_hash = SRTHandler.get_hash(clean)
+                if l_hash in self.cache:
+                    final_lines.append(self.cache[l_hash])
+                else:
+                    pre_treated = self._apply_dictionary(clean)
+                    to_translate.append((len(final_lines), pre_treated, l_hash, clean))
+                    final_lines.append(None)
+
+        return final_lines, to_translate
+
+    def _retry_untranslated_lines(
+        self, current_batch: list, current_meta: list[tuple], results: list
+    ) -> None:
+        """Retry lines that appear untranslated (identical to source).
+
+        Modifies *results* in-place for lines where the translation
+        matches the original text.
+
+        Parameters
+        ----------
+        current_batch : list of str
+            Pre-treated texts sent in this batch.
+        current_meta : list of tuple
+            Metadata ``(slot_index, hash, original_text)`` per line.
+        results : list of str
+            Translation results (modified in-place on retry success).
+        """
+        untranslated = [
+            j for j, ((_, _, orig), res) in enumerate(zip(current_meta, results))
+            if res.strip().lower() == orig.strip().lower()
+        ]
+        if not untranslated:
+            return
+        logger.warning(
+            f"Batch: {len(untranslated)}/{len(current_batch)} line(s) "
+            f"appear untranslated. Retrying those lines..."
+        )
+        retry_texts = [current_batch[j] for j in untranslated]
+        retry_results = self._safe_translate_batch(retry_texts)
+        if retry_results and len(retry_results) == len(retry_texts):
+            for k, j in enumerate(untranslated):
+                results[j] = retry_results[k]
+
+    def _translate_uncached_lines(self, final_lines: list, to_translate: list[tuple]) -> None:
+        """Translate pending lines in batches and fill *final_lines* slots.
+
+        Batches are sized by ``max_chars_batch`` from config.  The
+        cache is saved periodically and after the last batch.
+        Lines that appear untranslated (identical to source) are
+        retried once via ``_retry_untranslated_lines``.
+
+        Parameters
+        ----------
+        final_lines : list
+            Mutable line slots — ``None`` entries are filled in-place.
+        to_translate : list of tuple
+            Pending entries as ``(slot_index, pre-treated_text, hash, original_text)``.
+        """
+        i = 0
+        batch_count = 0
+        max_chars = self.config["translation"].get("max_chars_batch", 2000)
+
+        while i < len(to_translate):
+            current_batch, current_meta, current_len = [], [], 0
+
+            while i < len(to_translate) and current_len < max_chars:
+                idx, txt, h, orig = to_translate[i]
+                current_batch.append(txt)
+                current_meta.append((idx, h, orig))
+                current_len += len(txt)
+                i += 1
+
+            if current_batch:
+                results = self._safe_translate_batch(current_batch)
+                if results and len(results) == len(current_batch):
+                    self._retry_untranslated_lines(current_batch, current_meta, results)
+                    for (idx, h, _), res in zip(current_meta, results):
+                        final_lines[idx] = res
+                        self.cache[h] = res
+
+                batch_count += 1
+                if batch_count % 5 == 0:
+                    self.save_cache()
+
+                time.sleep(random.uniform(1.2, 2.5))
+
+        if batch_count % 5 != 0:
+            self.save_cache()
 
     def translate_logic(self, text: str):
         """
@@ -174,70 +290,6 @@ class LegacyTranslator(BaseTranslator):
             are replaced with ``"..."``.
         """
         lines = text.splitlines()
-        final_lines = []
-        to_translate = []
-
-        # 1. Analyze file and check line-cache
-        for line in lines:
-            clean = line.strip()
-            if re.match(r"^[0-9]+$", clean) or "-->" in clean or not clean:
-                final_lines.append(line)
-            else:
-                l_hash = SRTHandler.get_hash(clean)
-                if l_hash in self.cache:
-                    final_lines.append(self.cache[l_hash])
-                else:
-                    pre_treated = self._apply_dictionary(clean)
-                    to_translate.append((len(final_lines), pre_treated, l_hash, clean))
-                    final_lines.append(None)
-
-        # 2. Batch translation
-        i = 0
-        batch_count = 0
-        cache_save_interval = 5  # Save cache every N batches instead of every batch
-        max_chars = self.config["translation"].get("max_chars_batch", 2000)
-        while i < len(to_translate):
-            current_batch, current_meta, current_len = [], [], 0
-
-            while i < len(to_translate) and current_len < max_chars:
-                idx, txt, h, orig = to_translate[i]
-                current_batch.append(txt)
-                current_meta.append((idx, h, orig))
-                current_len += len(txt)
-                i += 1
-
-            if current_batch:
-                results = self._safe_translate_batch(current_batch)
-                # Safeguard: if batch fails, results might be empty
-                if results and len(results) == len(current_batch):
-                    # Identify lines that appear untranslated (identical to source)
-                    untranslated = [
-                        j for j, ((_, _, orig), res) in enumerate(zip(current_meta, results))
-                        if res.strip().lower() == orig.strip().lower()
-                    ]
-                    if untranslated:
-                        logger.warning(
-                            f"Batch: {len(untranslated)}/{len(current_batch)} line(s) "
-                            f"appear untranslated. Retrying those lines..."
-                        )
-                        retry_texts = [current_batch[j] for j in untranslated]
-                        retry_results = self._safe_translate_batch(retry_texts)
-                        if retry_results and len(retry_results) == len(retry_texts):
-                            for k, j in enumerate(untranslated):
-                                results[j] = retry_results[k]
-
-                    for (idx, h, _), res in zip(current_meta, results):
-                        final_lines[idx] = res
-                        self.cache[h] = res
-
-                batch_count += 1
-                if batch_count % cache_save_interval == 0:
-                    self.save_cache()
-
-                time.sleep(random.uniform(1.2, 2.5))
-
-        # Final cache save for any remaining unsaved entries
-        if batch_count % cache_save_interval != 0:
-            self.save_cache()
-
+        final_lines, to_translate = self._separate_cached_lines(lines)
+        self._translate_uncached_lines(final_lines, to_translate)
         return "\n".join([line if line is not None else "..." for line in final_lines])

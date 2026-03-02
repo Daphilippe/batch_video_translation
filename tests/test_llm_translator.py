@@ -128,10 +128,11 @@ class TestCheckpointRecovery:
         (input_dir / "test.srt").write_text(SRT_3_BLOCKS, encoding="utf-8")
 
         # Chunk 1 succeeds, chunk 2 raises a fatal error
+        from modules.providers.base_provider import LLMProviderError
         provider = MockProvider(
             responses=[
                 "1\n00:00:01,000 --> 00:00:02,000\nUn\n",
-                RuntimeError("LLM crashed"),
+                LLMProviderError("LLM crashed"),
                 "3\n00:00:05,000 --> 00:00:06,000\nTrois\n",
             ]
         )

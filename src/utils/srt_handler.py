@@ -351,8 +351,8 @@ class SRTHandler:
 
         for b in blocks:
             text = "\n".join(b["text"]).strip() if isinstance(b["text"], list) else b["text"]
-            if prev and text == prev["text"]:
-                prev["end"] = b["end"]
+            if prev is not None and text == prev["text"]:  # pylint: disable=unsubscriptable-object
+                prev["end"] = b["end"]  # pylint: disable=unsupported-assignment-operation
             else:
                 prev = {"start": b["start"], "end": b["end"], "text": text}
                 merged.append(prev)

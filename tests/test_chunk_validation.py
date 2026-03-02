@@ -248,9 +248,7 @@ class TestHybridWindowRetry:
     def _make_refiner(self, tmp_path, provider):
         config = {"chunk_size": 10, "chunk_delay": 0}
         return HybridRefiner(
-            s1_dir=str(tmp_path / "s1"),
-            l1_dir=str(tmp_path / "l1"),
-            mt_dir=str(tmp_path / "mt"),
+            source_dirs={"s1": str(tmp_path / "s1"), "l1": str(tmp_path / "l1"), "mt": str(tmp_path / "mt")},
             output_dir=str(tmp_path / "out"),
             provider=provider,
             config=config,
@@ -263,25 +261,28 @@ class TestHybridWindowRetry:
         # First attempt returns source, second returns translation
         provider = MockProvider(responses=[source_srt, translated_srt])
         refiner = self._make_refiner(tmp_path, provider)
+        refiner._active_protocol = "system"
 
         s1_win = [{"index": 1, "start": "00:00:01,000", "end": "00:00:03,000", "text": ["Hello"]}]
-        result = refiner._refine_window(s1_win, "system", "prompt", "1/1")
+        result = refiner._refine_window(s1_win, [0], {"l1": {}, "mt": {}})
 
         assert result is not None
         assert result[0]["text"] == ["Bonjour"]
         assert provider.call_count == 2
 
     def test_gives_up_after_two_attempts(self, tmp_path):
-        """After 2 failed attempts, returns None."""
+        """After 2 failed attempts, returns S1 source blocks."""
         source_srt = "1\n00:00:01,000 --> 00:00:03,000\nHello\n"
         # Both attempts return source text
         provider = MockProvider(responses=[source_srt, source_srt])
         refiner = self._make_refiner(tmp_path, provider)
+        refiner._active_protocol = "system"
 
         s1_win = [{"index": 1, "start": "00:00:01,000", "end": "00:00:03,000", "text": ["Hello"]}]
-        result = refiner._refine_window(s1_win, "system", "prompt", "1/1")
+        result = refiner._refine_window(s1_win, [0], {"l1": {}, "mt": {}})
 
-        assert result is None
+        # Falls back to S1 source blocks after 2 failed attempts
+        assert result[0]["text"] == ["Hello"]
         assert provider.call_count == 2
 
     def test_no_retry_when_translated(self, tmp_path):
@@ -289,9 +290,10 @@ class TestHybridWindowRetry:
         translated_srt = "1\n00:00:01,000 --> 00:00:03,000\nBonjour\n"
         provider = MockProvider(responses=[translated_srt])
         refiner = self._make_refiner(tmp_path, provider)
+        refiner._active_protocol = "system"
 
         s1_win = [{"index": 1, "start": "00:00:01,000", "end": "00:00:03,000", "text": ["Hello"]}]
-        result = refiner._refine_window(s1_win, "system", "prompt", "1/1")
+        result = refiner._refine_window(s1_win, [0], {"l1": {}, "mt": {}})
 
         assert result is not None
         assert result[0]["text"] == ["Bonjour"]
@@ -303,9 +305,10 @@ class TestHybridWindowRetry:
         translated_srt = "1\n00:00:10,000 --> 00:00:12,000\nBonjour\n"
         provider = MockProvider(responses=[translated_srt])
         refiner = self._make_refiner(tmp_path, provider)
+        refiner._active_protocol = "system"
 
         s1_win = [{"index": 1, "start": "00:00:01,000", "end": "00:00:03,000", "text": ["Hello"]}]
-        result = refiner._refine_window(s1_win, "system", "prompt", "1/1")
+        result = refiner._refine_window(s1_win, [0], {"l1": {}, "mt": {}})
 
         assert result is not None
         assert result[0]["start"] == "00:00:01,000"
@@ -317,9 +320,10 @@ class TestHybridWindowRetry:
         # First attempt returns empty, second returns valid translation
         provider = MockProvider(responses=["", translated_srt])
         refiner = self._make_refiner(tmp_path, provider)
+        refiner._active_protocol = "system"
 
         s1_win = [{"index": 1, "start": "00:00:01,000", "end": "00:00:03,000", "text": ["Hello"]}]
-        result = refiner._refine_window(s1_win, "system", "prompt", "1/1")
+        result = refiner._refine_window(s1_win, [0], {"l1": {}, "mt": {}})
 
         assert result is not None
         assert result[0]["text"] == ["Bonjour"]

@@ -21,10 +21,12 @@ def _make_transcriber(tmp_path, lang="auto", segment_time=600):
     return WhisperTranscriber(
         input_dir=str(tmp_path / "in"),
         output_dir=str(tmp_path / "out"),
-        whisper_bin=str(whisper_bin),
-        model_path=str(model_path),
-        lang=lang,
-        segment_time=segment_time,
+        config={
+            "bin_path": str(whisper_bin),
+            "model_path": str(model_path),
+            "lang": lang,
+            "segment_time": segment_time,
+        },
     )
 
 
@@ -48,8 +50,7 @@ class TestWhisperTranscriberInit:
             WhisperTranscriber(
                 str(tmp_path / "in"),
                 str(tmp_path / "out"),
-                str(tmp_path / "missing.exe"),
-                str(model),
+                {"bin_path": str(tmp_path / "missing.exe"), "model_path": str(model)},
             )
 
     def test_missing_model_raises(self, tmp_path):
@@ -60,8 +61,7 @@ class TestWhisperTranscriberInit:
             WhisperTranscriber(
                 str(tmp_path / "in"),
                 str(tmp_path / "out"),
-                str(whisper_bin),
-                str(tmp_path / "missing.bin"),
+                {"bin_path": str(whisper_bin), "model_path": str(tmp_path / "missing.bin")},
             )
 
     def test_custom_lang_and_segment(self, tmp_path):
