@@ -1,0 +1,128 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        // ── Linting ───────────────────────────────────────────────
+        {
+            "label": "Ruff: lint",
+            "type": "shell",
+            "command": "python",
+            "args": ["-m", "ruff", "check", "src/", "tests/"],
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "Ruff: lint + fix",
+            "type": "shell",
+            "command": "python",
+            "args": ["-m", "ruff", "check", "--fix", "src/", "tests/"],
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "Ruff: format",
+            "type": "shell",
+            "command": "python",
+            "args": ["-m", "ruff", "format", "src/", "tests/"],
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "Pylint: full analysis",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m", "pylint",
+                "src/modules/", "src/utils/", "src/main.py",
+                "--rcfile=pyproject.toml"
+            ],
+            "group": "test",
+            "problemMatcher": "$pylint",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        // ── Testing ───────────────────────────────────────────────
+        {
+            "label": "Pytest: run all",
+            "type": "shell",
+            "command": "python",
+            "args": ["-m", "pytest", "tests/", "-v"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "Coverage: run + report",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m", "pytest",
+                "--cov=src",
+                "--cov-config=pyproject.toml",
+                "--cov-report=term-missing",
+                "--cov-report=html",
+                "tests/",
+                "-v"
+            ],
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "Coverage: open HTML report",
+            "type": "shell",
+            "command": "start",
+            "args": ["htmlcov/index.html"],
+            "windows": {
+                "command": "start",
+                "args": ["htmlcov\\index.html"]
+            },
+            "dependsOn": "Coverage: run + report",
+            "problemMatcher": []
+        },
+        // ── Combined ──────────────────────────────────────────────
+        {
+            "label": "Quality: full check (ruff + pylint + coverage)",
+            "dependsOn": [
+                "Ruff: lint",
+                "Pylint: full analysis",
+                "Coverage: run + report"
+            ],
+            "dependsOrder": "sequence",
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        }
+    ]
+}

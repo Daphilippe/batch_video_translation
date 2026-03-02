@@ -1,5 +1,3 @@
-import pytest
-from unittest.mock import MagicMock, patch
 from modules.llm_translator import LLMTranslator
 from modules.providers.base_provider import LLMProvider
 from modules.providers.llama_provider import LLMProviderError
@@ -28,7 +26,7 @@ class TestLLMTranslatorLogic:
         """Should translate a simple SRT correctly."""
         translated_srt = "1\n00:00:01,000 --> 00:00:03,000\nBonjour le monde\n"
         provider = MockProvider(responses=[translated_srt])
-        
+
         config = {"source_lang": "English", "target_lang": "French", "chunk_size": 50}
         translator = LLMTranslator(
             input_dir=str(tmp_path / "in"),
@@ -36,7 +34,7 @@ class TestLLMTranslatorLogic:
             provider=provider,
             config=config,
         )
-        
+
         source = "1\n00:00:01,000 --> 00:00:03,000\nHello world\n"
         result = translator.translate_logic(source)
         assert "Bonjour le monde" in result
@@ -44,7 +42,7 @@ class TestLLMTranslatorLogic:
     def test_translate_logic_provider_error_keeps_source(self, tmp_path):
         """When provider raises, the source chunk should be kept."""
         provider = MockProvider(responses=[LLMProviderError("Server down")])
-        
+
         config = {"source_lang": "English", "target_lang": "French", "chunk_size": 50}
         translator = LLMTranslator(
             input_dir=str(tmp_path / "in"),
@@ -52,7 +50,7 @@ class TestLLMTranslatorLogic:
             provider=provider,
             config=config,
         )
-        
+
         source = "1\n00:00:01,000 --> 00:00:03,000\nHello world\n"
         result = translator.translate_logic(source)
         # Should fallback to source text
@@ -61,7 +59,7 @@ class TestLLMTranslatorLogic:
     def test_translate_logic_empty_response_keeps_source(self, tmp_path):
         """When provider returns unparseable content, source chunk should be kept."""
         provider = MockProvider(responses=[""])
-        
+
         config = {"source_lang": "English", "target_lang": "French", "chunk_size": 50}
         translator = LLMTranslator(
             input_dir=str(tmp_path / "in"),
@@ -69,7 +67,7 @@ class TestLLMTranslatorLogic:
             provider=provider,
             config=config,
         )
-        
+
         source = "1\n00:00:01,000 --> 00:00:03,000\nHello world\n"
         result = translator.translate_logic(source)
         assert "Hello world" in result
@@ -81,18 +79,18 @@ class TestLLMTranslatorLogic:
             "1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\n00:00:03,000 --> 00:00:04,000\nB\n",
             "3\n00:00:05,000 --> 00:00:06,000\nC\n",
         ])
-        
+
         translator = LLMTranslator(
             input_dir=str(tmp_path / "in"),
             output_dir=str(tmp_path / "out"),
             provider=provider,
             config=config,
         )
-        
+
         source = (
             "1\n00:00:01,000 --> 00:00:02,000\nA\n\n"
             "2\n00:00:03,000 --> 00:00:04,000\nB\n\n"
             "3\n00:00:05,000 --> 00:00:06,000\nC\n"
         )
-        result = translator.translate_logic(source)
+        result = translator.translate_logic(source)  # noqa: F841
         assert provider.call_count == 2  # 2 chunks: [A,B] and [C]

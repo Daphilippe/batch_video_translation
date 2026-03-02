@@ -1,28 +1,61 @@
-import subprocess
-import shutil
 import logging
+import shutil
+import subprocess
 from pathlib import Path
+
 from utils.file_handler import DirectoryMirrorTask
 
 logger = logging.getLogger(__name__)
 
 class AudioExtractor(DirectoryMirrorTask):
+    """Extract and segment audio tracks from video files using FFmpeg.
+
+    For each video, creates a subfolder of WAV chunks
+    (``part000.wav``, ``part001.wav``, …) ready for Whisper
+    transcription.  Existing segments are skipped automatically.
+    """
+
     def __init__(self, input_dir: str, output_dir: str, extensions: tuple = (".mp4", ".mkv"), segment_time: int = 600):
         """
-        Initializes the extractor with segmentation support.
-        :param segment_time: Duration of each audio chunk in seconds.
+        Initialize the extractor with segmentation support.
+
+        Parameters
+        ----------
+        input_dir : str
+            Directory containing source video files.
+        output_dir : str
+            Directory where audio segment folders are created.
+        extensions : tuple of str, optional
+            Video extensions to process
+            (default ``(".mp4", ".mkv")``).
+        segment_time : int, optional
+            Duration of each audio chunk in seconds (default 600).
+
+        Raises
+        ------
+        FileNotFoundError
+            If FFmpeg is not found in ``PATH``.
         """
         super().__init__(input_dir, output_dir, extensions)
         self.sample_rate = "16000"
         self.segment_time = segment_time
-        
+
         # Validate FFmpeg availability
         if not shutil.which("ffmpeg"):
             raise FileNotFoundError("FFmpeg not found in PATH. Install it and ensure it's accessible.")
 
     def process_file(self, input_file: Path):
         """
-        Segments the audio from a video file into multiple WAV chunks.
+        Segment audio from a single video file into WAV chunks.
+
+        Creates a dedicated subfolder mirroring the video name,
+        then invokes FFmpeg's ``segment`` muxer to produce
+        16 kHz mono WAV files of ``self.segment_time`` seconds each.
+
+        Parameters
+        ----------
+        input_file : Path
+            Path to the source video file.
         """
         # Create a specific directory for this video's segments
         # to avoid mixing chunks from different source files.
@@ -31,7 +64,7 @@ class AudioExtractor(DirectoryMirrorTask):
 
         # Output pattern: part000.wav, part001.wav, etc.
         output_pattern = video_output_dir / "part%03d.wav"
-        
+
         # Check if the first segment already exists to prevent redundant processing.
         if (video_output_dir / "part000.wav").exists():
             logger.info(f"Segments already exist for: {input_file.name}")
@@ -47,7 +80,7 @@ class AudioExtractor(DirectoryMirrorTask):
             "-c:a", "pcm_s16le",             # Uncompressed 16-bit WAV format
             str(output_pattern)
         ]
-        
+
         try:
             # We use capture_output to keep the logs clean unless an error occurs
             subprocess.run(cmd, check=True, capture_output=True)

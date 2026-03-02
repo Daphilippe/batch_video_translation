@@ -7,13 +7,12 @@ This project is a modular and scalable pipeline designed to automate the process
 * **Audio Extraction**: Automated conversion of video tracks to 16kHz WAV format.
 * **Local Transcription**: Uses `whisper.cpp` for fast, offline, and private speech-to-text.
 * **SRT Optimization**: Advanced logic to merge identical consecutive segments and eliminate "flickering" effects.
-* **Hybrid Translation Engines**:
-  * **LLM Engine**: High-quality translation via Large Language Models (e.g., Copilot via UI Automation) for better nuance.
-  * **Legacy Engine**: Rapid translation using standard APIs and custom technical dictionaries.
-  * **Local LLM Engine**: OpenAI-compatible local endpoint support (e.g., llama.cpp).
-
-
-* **Resilient Workspace**: Intelligent directory mirroring that allows resuming the process at any stage (Extraction, Transcription, or Translation).
+* **Translation Engines**:
+  * **Legacy Engine**: Rapid translation using Google Translate APIs with line-level caching and custom technical dictionaries.
+  * **LLM Engine (Local)**: OpenAI-compatible local endpoint support (e.g., llama.cpp).
+  * **LLM Engine (UI)**: High-quality translation via Large Language Models (e.g., Copilot via UI Automation).
+  * **Hybrid Engine** *(new)*: Triple-source arbitration — S1 (source SRT) + L1 (literal Google Translate) + Mt (LLM draft) → HybridRefiner for professional post-editing with incremental re-run support.
+* **Resilient Workspace**: Intelligent directory mirroring that allows resuming the process at any stage.
 
 ---
 
@@ -21,25 +20,38 @@ This project is a modular and scalable pipeline designed to automate the process
 
 ```text
 project_root/
+├── .vscode/
+│   └── tasks.json            # VS Code tasks (ruff, pylint, coverage)
 ├── configs/
-│   └── settings.json        # Global configuration (paths, languages, etc.)
+│   ├── settings.json          # Global configuration (paths, languages, etc.)
+│   ├── system_prompt.txt      # System prompt template for LLM translation
+│   └── refinement_protocol.txt # Hybrid refiner arbitration instructions
 ├── src/
-│   ├── main.py              # Main orchestrator (The Command Center)
+│   ├── main.py                # Pipeline orchestrator (4-step pipeline)
 │   ├── modules/
-│   │   ├── translator.py    # Parent Abstract Class (BaseTranslator)
-│   │   ├── legacy_translator.py # Google Translate + Dictionary engine
-│   │   ├── llm_translator.py # Chunked LLM translation management																
-│   │   ├── extractor.py      # Audio extraction logic (FFmpeg)
-│   │   ├── transcriber.py    # Subprocess wrapper for Whisper.cpp
-│   │   ├── srt_optimizer.py  # SRT structure cleaning
+│   │   ├── translator.py      # BaseTranslator — abstract class (skip logic, standardize)
+│   │   ├── legacy_translator.py # Google Translate + dictionary + line-cache
+│   │   ├── llm_translator.py  # Chunked LLM translation
+│   │   ├── extractor.py       # Audio extraction (FFmpeg segmentation)
+│   │   ├── transcriber.py     # Whisper.cpp subprocess wrapper
+│   │   ├── srt_optimizer.py   # SRT structure cleaning (Step 3)
+│   │   ├── strategies/
+│   │   │   └── hybrid_refiner.py # Triple-source arbitration (S1+L1+Mt)
 │   │   └── providers/
-│   │       ├── base_provider.py # Abstract interface for LLMs
-│   │       └── copilot_ui.py    # UI Automation for browser-based AI
+│   │       ├── base_provider.py  # LLMProvider ABC + LLMProviderError
+│   │       ├── llama_provider.py # Local llama.cpp HTTP provider
+│   │       └── copilot_ui.py     # Browser-based UI automation provider
 │   └── utils/
-│       ├── srt_handler.py    # Robust SRT parsing and cleaning
-│       └── file_handler.py   # Directory management and mirroring
-└── requirements.txt
-
+│       ├── srt_handler.py     # SRT parsing, rendering, alignment, hashing
+│       └── file_handler.py    # DirectoryMirrorTask base class
+├── tests/
+│   ├── test_srt_handler.py    # 84 tests (Unicode, CJK, merge, standardize)
+│   ├── test_file_handler.py
+│   ├── test_llm_provider.py
+│   └── test_llm_translator.py
+├── pyproject.toml             # Build config + ruff + pylint + coverage settings
+├── requirements.txt
+└── readme.md
 ```
 
 ---
@@ -84,9 +96,10 @@ python src/main.py --input "./source_videos" --output "./results" --mode full --
 
 Available `--engine` values:
 
-* `llm-ui` (Copilot UI automation)
-* `llm-local` (local OpenAI-compatible endpoint)
 * `legacy` (Google Translate + technical dictionary)
+* `llm-local` (local OpenAI-compatible endpoint, e.g. llama.cpp)
+* `llm-ui` (Copilot UI automation)
+* `hybrid` (triple-source arbitration: Legacy L1 + LLM Mt → Refiner)
 
 ### 2. Step-by-Step Execution
 
@@ -94,8 +107,18 @@ You can isolate specific stages using the `--mode` flag:
 
 * `extract`: Extract audio from video.
 * `transcribe`: Generate raw subtitles from audio.
-* `optimize`: Clean and merge subtitle blocks.
-* `translate`: Translate subtitles only (requires existing SRT files).
+* `optimize`: Clean and merge subtitle blocks (produces S1).
+* `translate`: Translate subtitles only (requires existing SRT files in `3_clean_srt/`).
+
+### 3. Hybrid Engine Details
+
+The `hybrid` engine executes three sub-steps automatically:
+
+1. **L1 generation** — Legacy translator produces a literal reference.
+2. **Mt generation** — LLM translator produces a stylistic draft.
+3. **Arbitration** — `HybridRefiner` aligns L1 and Mt against S1 timestamps and sends windowed prompts to the LLM for final post-editing.
+
+On **re-runs**, the refiner detects which blocks are already correctly translated and only re-processes problematic windows (missing, empty, or untranslated blocks), saving significant LLM cost.
 
 ---
 
@@ -120,15 +143,46 @@ pip install -r requirements.txt
 
 ```
 
-3. **Run tests**:
+3. **Install development tools** (linting, coverage):
+```bash
+pip install ruff pylint pytest-cov
+
+```
+
+4. **Run tests**:
 
 ```bash
 python -m pytest tests/ -v
 
 ```
 
+5. **Run tests with coverage**:
 
-4. **External Requirements**:
+```bash
+python -m pytest --cov=src --cov-config=pyproject.toml --cov-report=term-missing tests/ -v
+
+```
+
+6. **Linting**:
+
+```bash
+# Ruff (fast linter + formatter)
+python -m ruff check src/ tests/
+python -m ruff format src/ tests/
+
+# Pylint (deep analysis)
+python -m pylint src/modules/ src/utils/ src/main.py --rcfile=pyproject.toml
+
+```
+
+7. **VS Code Tasks** (Ctrl+Shift+P → "Tasks: Run Task"):
+   * `Ruff: lint` / `Ruff: lint + fix` / `Ruff: format`
+   * `Pylint: full analysis`
+   * `Pytest: run all` (default test task)
+   * `Coverage: run + report` / `Coverage: open HTML report`
+   * `Quality: full check (ruff + pylint + coverage)` — runs all three sequentially
+
+8. **External Requirements**:
 * **FFmpeg**: Must be in your System PATH.
 * **Whisper.cpp**: Compiled executable (e.g., `main.exe`).
 * **Microsoft Edge**: Required for the default `CopilotUIProvider`.
@@ -146,12 +200,15 @@ Here is the exhaustive list of parameters available in your configuration file:
 |  | `lang` | Source language code (`ru`, `en`, `fr` or `auto`). |
 | **LLM Engine** | `source_lang` | Full name of the source language for the prompt (e.g., "Russian"). |
 |  | `target_lang` | Full name of the target language (e.g., "French"). |
-|  | `chunk_size` | Number of SRT blocks sent in a single prompt (default: 25). |
+|  | `chunk_size` | Number of SRT blocks sent in a single prompt (default: 30). |
+|  | `chunk_delay` | Seconds between LLM API calls (rate-limit protection, default: 1.0). |
 |  | `prompt_file` | Path to the system prompt template text file used by the LLM translator. |
-| **Legacy** | `max_chars_batch` | Character limit for Google Translate batches. |
+| **Legacy** | `source_lang` / `target_lang` | ISO language codes for Google Translate (e.g., `en`, `fr`). |
+|  | `max_chars_batch` | Character limit for Google Translate batches. |
 |  | `retry_delay` | Seconds to wait between translation retries. |
 |  | `max_retries` | Maximum number of retry attempts when rate-limited (HTTP 429). |
 |  | `cache_file` | Path to the JSON cache used for line-level translation reuse. |
+| **Hybrid** | `refinement_protocol_file` | Path to the arbitration system prompt (default: `configs/refinement_protocol.txt`). |
 | **Context** | `technical_dictionary` | Key-value pairs of terms to ensure consistent translation. |
 
 ---

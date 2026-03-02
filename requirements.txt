@@ -16,3 +16,8 @@ mouse==0.7.1            # Operator click detection
 # --- System Dependencies ---
 python-dotenv==1.0.1    # Optional environment variable management
 tqdm==4.66.4            # Console progress bars
+
+# --- Development Tools (install separately: pip install -r requirements-dev.txt or manually) ---
+# ruff                  # Fast linter + formatter (configured in pyproject.toml)
+# pylint                # Deep static analysis   (configured in pyproject.toml)
+# pytest-cov            # Coverage plugin for pytest (configured in pyproject.toml)

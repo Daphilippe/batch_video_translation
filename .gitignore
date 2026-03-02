@@ -1,4 +1,4 @@
-# Configuration
+# Configuration (user-specific paths and secrets)
 configs/settings.json
 configs/system_prompt.txt
 
@@ -6,8 +6,23 @@ configs/system_prompt.txt
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+dist/
+build/
 venv/
+.venv/
 .env
+
+# Testing & Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Linting caches
+.ruff_cache/
+.pylint.d/
 
 # Workspace / Data
 project_workspace/
@@ -15,7 +30,7 @@ internals/
 subtitles_ready/
 data/translation_cache.json
 
-# Media files (Sécurité si tu les déplaces par erreur)
+# Media files
 *.mp4
 *.mkv
 *.avi
@@ -25,6 +40,11 @@ data/translation_cache.json
 # Whisper models and bins
 *.bin
 *.exe
+
+# IDE
+.vscode/*
+!.vscode/tasks.json
+!.vscode/extensions.json
 
 # OS
 .DS_Store

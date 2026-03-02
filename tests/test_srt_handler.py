@@ -1,6 +1,5 @@
 from utils.srt_handler import SRTHandler
 
-
 # --- Fixtures & Sample Data ---
 
 SAMPLE_SRT = """\
@@ -425,9 +424,9 @@ class TestCyrillicSupport:
 
     def test_merge_identical_cyrillic(self):
         content = (
-            "1\n00:00:01,000 --> 00:00:02,000\nПривет\n\n"
-            "2\n00:00:02,000 --> 00:00:03,000\nПривет\n\n"
-            "3\n00:00:04,000 --> 00:00:05,000\nМир\n"
+            "1\n00:00:01,000 --> 00:00:02,000\nПривет\n\n"  # noqa: RUF001
+            "2\n00:00:02,000 --> 00:00:03,000\nПривет\n\n"  # noqa: RUF001
+            "3\n00:00:04,000 --> 00:00:05,000\nМир\n"  # noqa: RUF001
         )
         result = SRTHandler.standardize(content)
         blocks = SRTHandler.parse_to_blocks(result)
@@ -472,11 +471,11 @@ class TestChineseSupport:
         assert result == "等一下..."
 
     def test_fullwidth_digits_not_treated_as_index(self):
-        """Full-width digits (１２３) must NOT be parsed as SRT block indices."""
-        content = "1\n00:00:01,000 --> 00:00:02,000\n１２３\n"
+        """Full-width digits (１２３) must NOT be parsed as SRT block indices."""  # noqa: RUF002
+        content = "1\n00:00:01,000 --> 00:00:02,000\n１２３\n"  # noqa: RUF001
         blocks = SRTHandler.parse_to_blocks(content)
         assert len(blocks) == 1
-        assert blocks[0]["text"] == ["１２３"]
+        assert blocks[0]["text"] == ["１２３"]  # noqa: RUF001
 
     def test_merge_identical_chinese(self):
         content = (
@@ -510,7 +509,7 @@ class TestMixedScriptSupport:
 
     def test_arabic_digits_not_treated_as_index(self):
         """Arabic-Indic digits (٣٢١) must NOT be parsed as SRT block indices."""
-        content = "1\n00:00:01,000 --> 00:00:02,000\n٣٢١\n"
+        content = "1\n00:00:01,000 --> 00:00:02,000\n٣٢١\n"  # noqa: RUF001
         blocks = SRTHandler.parse_to_blocks(content)
         assert len(blocks) == 1
         assert blocks[0]["text"] == ["٣٢١"]
@@ -543,7 +542,7 @@ class TestMixedScriptSupport:
 
     def test_russian_quotes_preserved(self):
         """Russian-style quotes (« ») should be preserved, not stripped."""
-        content = '1\n00:00:01,000 --> 00:00:02,000\nОн сказал «привет»\n'
+        content = '1\n00:00:01,000 --> 00:00:02,000\nОн сказал «привет»\n'  # noqa: RUF001
         blocks = SRTHandler.parse_to_blocks(content)
         assert blocks[0]["text"] == ['Он сказал «привет»']
 

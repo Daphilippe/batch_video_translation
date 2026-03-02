@@ -1,7 +1,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import List, Dict
+
 from modules.translator import BaseTranslator
 from utils.srt_handler import SRTHandler
 
@@ -12,19 +12,38 @@ class HybridRefiner(BaseTranslator):
     """
     Triple-source arbitration translator (S1 + L1 + Mt → Final).
 
-    Alignment strategy:
-      S1 is the master timeline. Each S1 block is matched to its closest
-      L1 and Mt block by start-timestamp proximity. This handles the fact
-      that L1/Mt may have fewer blocks (due to merge_identical_blocks in
-      standardize) or slightly different timestamps.
+    Aligns three SRT streams — S1 (source anchor / Whisper), L1
+    (literal Google Translate), and Mt (LLM draft) — using a
+    two-pointer sweep on start-timestamps, then sends windowed
+    prompts to the LLM for final refinement.
+
+    Supports **incremental re-runs**: on subsequent executions only
+    windows containing problematic blocks (empty, untranslated, or
+    missing) are re-processed.
+
+    Parameters
+    ----------
+    s1_dir : str
+        Directory of source SRT files (master timeline).
+    l1_dir : str
+        Directory of literal translations (Google Translate).
+    mt_dir : str
+        Directory of LLM draft translations.
+    output_dir : str
+        Directory for final refined SRT files.
+    provider : LLMProvider
+        Backend used for refinement prompts.
+    config : dict
+        Settings including ``chunk_size``, ``chunk_delay``, and
+        ``refinement_protocol_file``.
     """
 
     # Maximum allowed drift (seconds) between an S1 block and its L1/Mt match.
     # Beyond this, the block is considered unmatched.
     ALIGNMENT_TOLERANCE = 5.0
 
-    def __init__(self, s1_dir: str, l1_dir: str, mt_dir: str, output_dir: str, provider, config: Dict):
-        super().__init__(s1_dir, output_dir, bot=provider)
+    def __init__(self, s1_dir: str, l1_dir: str, mt_dir: str, output_dir: str, provider, config: dict):
+        super().__init__(s1_dir, output_dir)
         self.l1_dir = Path(l1_dir)
         self.mt_dir = Path(mt_dir)
         self.config = config
@@ -36,37 +55,48 @@ class HybridRefiner(BaseTranslator):
     # File-level orchestration
     # ------------------------------------------------------------------
 
-    def process_file(self, s1_file: Path):
-        """Processes a single file by arbitrating between S1, L1, and Mt sources."""
-        output_file = self.get_output_path(s1_file, ".srt")
+    def process_file(self, input_file: Path):  # pylint: disable=arguments-renamed
+        """
+        Refine a single SRT file via triple-source arbitration.
+
+        Loads S1, L1, and Mt streams, optionally loads existing
+        output for incremental refinement, runs ``refine_logic``,
+        standardizes and writes the result.
+
+        Parameters
+        ----------
+        input_file : Path
+            Path to the S1 (source) ``.srt`` file.
+        """
+        output_file = self.get_output_path(input_file, ".srt")
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        relative_path = s1_file.relative_to(self.input_dir)
+        relative_path = input_file.relative_to(self.input_dir)
         l1_file = self.l1_dir / relative_path
         mt_file = self.mt_dir / relative_path
 
         if not l1_file.exists() or not mt_file.exists():
-            logger.error(f"Missing input streams for {s1_file.name}. L1: {l1_file.exists()}, Mt: {mt_file.exists()}")
+            logger.error(f"Missing input streams for {input_file.name}. L1: {l1_file.exists()}, Mt: {mt_file.exists()}")
             return
 
-        logger.info(f"Starting triple-source refinement for: {s1_file.name}")
+        logger.info(f"Starting triple-source refinement for: {input_file.name}")
 
         # Load existing output for incremental refinement
         existing_refined_text = None
         if output_file.exists():
             try:
-                with open(output_file, "r", encoding="utf-8") as f:
+                with open(output_file, encoding="utf-8") as f:
                     existing_refined_text = f.read()
-                logger.info(f"Existing output found for {s1_file.name}. Attempting incremental refinement.")
+                logger.info(f"Existing output found for {input_file.name}. Attempting incremental refinement.")
             except Exception as e:
                 logger.warning(f"Failed to read existing output: {e}. Performing full refinement.")
 
         try:
-            with open(s1_file, "r", encoding="utf-8") as f:
+            with open(input_file, encoding="utf-8") as f:
                 s1_raw = f.read()
-            with open(l1_file, "r", encoding="utf-8") as f:
+            with open(l1_file, encoding="utf-8") as f:
                 l1_raw = f.read()
-            with open(mt_file, "r", encoding="utf-8") as f:
+            with open(mt_file, encoding="utf-8") as f:
                 mt_raw = f.read()
         except Exception as e:
             logger.error(f"Failed to read input files for refinement: {e}")
@@ -75,7 +105,7 @@ class HybridRefiner(BaseTranslator):
         final_srt_content = self.refine_logic(s1_raw, l1_raw, mt_raw, existing_refined_text)
 
         if final_srt_content is None:
-            logger.info(f"No changes needed for {s1_file.name}. Skipping write.")
+            logger.info(f"No changes needed for {input_file.name}. Skipping write.")
             return
 
         try:
@@ -91,19 +121,44 @@ class HybridRefiner(BaseTranslator):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _ts(block: Dict) -> float:
-        """Shortcut to convert a block's start timestamp to seconds."""
+    def _ts(block: dict) -> float:
+        """
+        Convert a block's start timestamp to seconds.
+
+        Parameters
+        ----------
+        block : dict
+            SRT block with a ``start`` key.
+
+        Returns
+        -------
+        float
+            Start time in fractional seconds.
+        """
         return SRTHandler.timestamp_to_seconds(block['start'])
 
-    def _build_alignment_map(self, s1_blocks: List[Dict], target_blocks: List[Dict]) -> Dict[int, Dict]:
+    def _build_alignment_map(self, s1_blocks: list[dict], target_blocks: list[dict]) -> dict[int, dict]:
         """
-        Maps each S1 block index → closest target block by start-timestamp.
+        Map each S1 block index to the closest target block.
 
-        Uses a two-pointer sweep (both lists are time-ordered) for O(n+m)
-        complexity instead of O(n*m). A target block may be reused across
-        multiple S1 indices (merged block case).
+        Uses a two-pointer sweep (both lists are time-ordered)
+        for *O(n+m)* complexity.  A target block may be reused
+        across multiple S1 indices when it spans a merged region.
+
+        Parameters
+        ----------
+        s1_blocks : list of dict
+            Parsed S1 (source) SRT blocks.
+        target_blocks : list of dict
+            Parsed L1 or Mt blocks to align against S1.
+
+        Returns
+        -------
+        dict of int to dict
+            ``{s1_index: closest_target_block}`` for all matches
+            within ``ALIGNMENT_TOLERANCE`` seconds.
         """
-        alignment: Dict[int, Dict] = {}
+        alignment: dict[int, dict] = {}
         if not target_blocks:
             return alignment
 
@@ -140,11 +195,24 @@ class HybridRefiner(BaseTranslator):
 
         return alignment
 
-    def _collect_window_targets(self, window_indices: List[int], alignment_map: Dict[int, Dict]) -> List[Dict]:
+    def _collect_window_targets(self, window_indices: list[int], alignment_map: dict[int, dict]) -> list[dict]:
         """
-        Collects unique, ordered target blocks for a given window of S1 indices.
-        Deduplicates by object identity (a merged target block may map to
-        several S1 blocks but should appear only once in the prompt).
+        Collect unique, ordered target blocks for a window of S1 indices.
+
+        Deduplicates by object identity so that a merged target block
+        mapped to several S1 blocks appears only once in the prompt.
+
+        Parameters
+        ----------
+        window_indices : list of int
+            S1 block indices belonging to the current window.
+        alignment_map : dict of int to dict
+            Alignment map produced by ``_build_alignment_map``.
+
+        Returns
+        -------
+        list of dict
+            Unique target blocks in order of first appearance.
         """
         seen_ids = set()
         result = []
@@ -155,8 +223,19 @@ class HybridRefiner(BaseTranslator):
                 result.append(blk)
         return result
 
-    def _log_alignment_quality(self, label: str, s1_blocks: List[Dict], alignment_map: Dict[int, Dict]):
-        """Logs alignment statistics for diagnostics."""
+    def _log_alignment_quality(self, label: str, s1_blocks: list[dict], alignment_map: dict[int, dict]):
+        """
+        Log alignment match statistics for diagnostics.
+
+        Parameters
+        ----------
+        label : str
+            Human-readable stream name (e.g. ``"L1"`` or ``"Mt"``).
+        s1_blocks : list of dict
+            Full list of S1 blocks.
+        alignment_map : dict of int to dict
+            Mapping from S1 index to matched target block.
+        """
         total = len(s1_blocks)
         matched = len(alignment_map)
         if matched == total:
@@ -174,24 +253,59 @@ class HybridRefiner(BaseTranslator):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _block_text(block: Dict) -> str:
-        """Extracts text from a block as a single stripped string."""
+    def _block_text(block: dict) -> str:
+        """
+        Extract a block's text content as a single stripped string.
+
+        Parameters
+        ----------
+        block : dict
+            SRT block with a ``text`` key (str or list of str).
+
+        Returns
+        -------
+        str
+            Concatenated, stripped text.
+
+        Examples
+        --------
+        >>> len(HybridRefiner._block_text({"text": ["Hello", "World"]}))
+        11
+
+        >>> HybridRefiner._block_text({"text": "Single line"})
+        'Single line'
+        """
         text = block.get('text', '')
         if isinstance(text, list):
             return "\n".join(text).strip()
         return str(text).strip()
 
     def _identify_problematic_indices(
-        self, s1_blocks: List[Dict], existing_blocks: List[Dict]
+        self, s1_blocks: list[dict], existing_blocks: list[dict]
     ) -> tuple:
         """
-        Compares existing refined output against S1 reference.
-        Returns (problematic_indices: set, existing_map: dict).
+        Detect blocks that need re-refinement.
 
-        A block is considered "problematic" and needs re-refinement if:
-          - No existing block aligns to that S1 index
-          - The aligned block has empty text
-          - The aligned block text is identical to S1 (not translated)
+        Compares existing refined output against the S1 reference.
+        A block is *problematic* when:
+
+        - No existing block aligns to that S1 index.
+        - The aligned block has empty text.
+        - The aligned block text is identical to S1 (not translated).
+
+        Parameters
+        ----------
+        s1_blocks : list of dict
+            Parsed S1 (source) blocks.
+        existing_blocks : list of dict
+            Parsed blocks from the previous refined output.
+
+        Returns
+        -------
+        problematic : set of int
+            S1 indices that require re-processing.
+        existing_map : dict of int to dict
+            Alignment map of S1 indices to existing blocks.
         """
         existing_map = self._build_alignment_map(s1_blocks, existing_blocks)
         problematic = set()
@@ -221,9 +335,33 @@ class HybridRefiner(BaseTranslator):
         problematic: set, total_blocks: int, context_padding: int = 2
     ) -> set:
         """
-        Expands problematic indices by adding surrounding blocks for context.
-        This ensures the LLM gets enough local context to produce coherent
-        translations around the problematic areas.
+        Expand problematic indices with surrounding context.
+
+        Adds *context_padding* neighbours on each side so that the
+        LLM receives enough local context to produce coherent
+        translations around problematic areas.
+
+        Parameters
+        ----------
+        problematic : set of int
+            Indices flagged as needing re-refinement.
+        total_blocks : int
+            Total number of S1 blocks (used for clamping).
+        context_padding : int, optional
+            Number of extra blocks on each side (default 2).
+
+        Returns
+        -------
+        set of int
+            Expanded set of indices to include in refinement.
+
+        Examples
+        --------
+        >>> sorted(HybridRefiner._expand_problematic_indices({5}, 20, 2))
+        [3, 4, 5, 6, 7]
+
+        >>> sorted(HybridRefiner._expand_problematic_indices({0}, 10, 2))
+        [0, 1, 2]
         """
         expanded = set()
         for idx in problematic:
@@ -236,14 +374,36 @@ class HybridRefiner(BaseTranslator):
     # Core arbitration loop
     # ------------------------------------------------------------------
 
-    def refine_logic(self, s1_text: str, l1_text: str, mt_text: str, existing_refined_text: str = None) -> str:
+    def refine_logic(self, s1_text: str, l1_text: str, mt_text: str, existing_refined_text: str | None = None) -> str:
         """
-        Slices the SRT into windows and performs the arbitration via LLM.
+        Perform windowed triple-source arbitration via LLM.
 
-        If existing_refined_text is provided (re-run scenario), performs
-        incremental refinement: only windows containing problematic blocks
-        are sent to the LLM. Already-good blocks are reused from the
-        existing output. Returns None if nothing needs re-processing.
+        Aligns L1 and Mt blocks to S1, slices the SRT into windows
+        of ``chunk_size`` blocks, and sends each window to the LLM
+        with an arbitration prompt.  S1 timestamps are always
+        enforced on the output.
+
+        When *existing_refined_text* is provided (re-run scenario),
+        only windows containing problematic blocks are sent to the
+        LLM; already-good blocks are reused from the existing output.
+
+        Parameters
+        ----------
+        s1_text : str
+            Raw SRT content from the source (Whisper) stream.
+        l1_text : str
+            Raw SRT content from the literal (Google) stream.
+        mt_text : str
+            Raw SRT content from the LLM draft stream.
+        existing_refined_text : str or None, optional
+            Previously refined SRT content for incremental mode
+            (default ``None`` → full refinement).
+
+        Returns
+        -------
+        str or None
+            Refined SRT content, or ``None`` if incremental mode
+            determined that no re-processing is needed.
         """
         s1_blocks = SRTHandler.parse_to_blocks(s1_text)
         l1_blocks = SRTHandler.parse_to_blocks(l1_text)
@@ -372,10 +532,27 @@ class HybridRefiner(BaseTranslator):
     # Prompt construction
     # ------------------------------------------------------------------
 
-    def _build_arbitration_prompt(self, s1: List[Dict], l1: List[Dict], mt: List[Dict]) -> str:
+    def _build_arbitration_prompt(self, s1: list[dict], l1: list[dict], mt: list[dict]) -> str:
         """
-        Formats the data sources with explicit block counts so the LLM
-        knows exactly how many blocks to output and that L1/Mt may differ.
+        Build the XML-structured arbitration prompt for the LLM.
+
+        Includes the three source streams with explicit block counts
+        so the LLM knows exactly how many blocks to output and that
+        L1/Mt may differ in count.
+
+        Parameters
+        ----------
+        s1 : list of dict
+            S1 (source) blocks for the current window.
+        l1 : list of dict
+            L1 (literal) blocks aligned to this window.
+        mt : list of dict
+            Mt (LLM draft) blocks aligned to this window.
+
+        Returns
+        -------
+        str
+            Formatted prompt ready to be sent to the LLM.
         """
         return f"""<S1_SOURCE_ORIGINAL count="{len(s1)}">
 {SRTHandler.render_blocks(s1)}
@@ -398,11 +575,37 @@ Do NOT merge, split, reorder, or skip any block. One S1 block = one output block
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _force_align_to_s1(s1_win: List[Dict], refined: List[Dict]) -> List[Dict]:
+    def _force_align_to_s1(s1_win: list[dict], refined: list[dict]) -> list[dict]:
         """
-        Pads or trims the refined blocks to match S1 block count exactly.
-        - If LLM returned too few: pad with S1 source blocks (untranslated).
-        - If LLM returned too many: trim to S1 count.
+        Pad or trim refined blocks to match the S1 block count.
+
+        If the LLM returned too few blocks, S1 source blocks are
+        appended as untranslated fallbacks.  If too many, the list
+        is trimmed.
+
+        Parameters
+        ----------
+        s1_win : list of dict
+            S1 blocks for the current window (defines target count).
+        refined : list of dict
+            LLM-produced blocks.
+
+        Returns
+        -------
+        list of dict
+            Block list with exactly ``len(s1_win)`` elements.
+
+        Examples
+        --------
+        >>> s1 = [{"text": "a"}, {"text": "b"}, {"text": "c"}]
+        >>> ref = [{"text": "x"}]
+        >>> result = HybridRefiner._force_align_to_s1(s1, ref)
+        >>> len(result)
+        3
+        >>> result[0]['text']
+        'x'
+        >>> result[2]['text']
+        'c'
         """
         result = refined[:len(s1_win)]
         while len(result) < len(s1_win):

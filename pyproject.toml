@@ -4,10 +4,84 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "video-translation-pipeline"
-version = "0.1.0"
-description = "Automated video transcription and translation pipeline"
+version = "0.2.0"
+description = "Automated video transcription and translation pipeline with hybrid LLM arbitration"
 requires-python = ">=3.9"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+# ── Ruff ────────────────────────────────────────────────────────────
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import ordering)
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "SIM108", # ternary operator suggestion
+    "B904",   # raise ... from ... inside except (noisy on legacy code)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["modules", "utils"]
+
+# ── Pylint ──────────────────────────────────────────────────────────
+[tool.pylint.main]
+source-roots = ["src"]
+ignore-paths = ["tests/__pycache__", "src/utils/__pycache__"]
+
+[tool.pylint."messages control"]
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring (we enforce via ruff D)
+    "R0903",  # too-few-public-methods
+    "W1203",  # logging-fstring-interpolation (acceptable in modern Python)
+    "C0301",  # line-too-long (handled by ruff formatter)
+    "E0401",  # import-error (external deps not installed in dev)
+    "W0718",  # broad-exception-caught (intentional resilience in pipeline)
+    "R0913",  # too-many-arguments (constructors with many config params)
+    "R0917",  # too-many-positional-arguments
+    "R0914",  # too-many-locals (complex orchestration methods)
+    "R0912",  # too-many-branches
+    "R0915",  # too-many-statements
+    "W0223",  # abstract-method (HybridRefiner uses refine_logic instead)
+    "E1136",  # unsubscriptable-object (false positive on typed dicts)
+    "E1137",  # unsupported-assignment-operation (false positive on typed dicts)
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+# ── Coverage ────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/__init__.py",
+    "src/modules/providers/copilot_ui.py",  # UI automation, untestable in CI
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 50
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
