@@ -1,0 +1,21 @@
+{
+    "recommendations": [
+        // Python core
+        "ms-python.python",
+        "ms-python.debugpy",
+
+        // Linting & formatting
+        "charliermarsh.ruff",
+        "ms-python.pylint",
+
+        // AI
+        "github.copilot",
+        "github.copilot-chat"
+    ],
+    "unwantedRecommendations": [
+        // Superseded by Ruff
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-python.flake8"
+    ]
+}

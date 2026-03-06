@@ -32,6 +32,8 @@ class SRTOptimizer(DirectoryMirrorTask):
 
         Reads *input_file*, applies the full ``SRTHandler.standardize``
         pipeline, and writes the result to the mirrored output path.
+        Skips the write when the output already exists and its content
+        hash matches the newly standardized version.
 
         Parameters
         ----------
@@ -45,6 +47,14 @@ class SRTOptimizer(DirectoryMirrorTask):
 
         # Apply the full conditioning immediately
         standardized_content = SRTHandler.standardize(content)
+
+        # Skip write when output already matches (hash comparison)
+        if output_file.exists():
+            with open(output_file, encoding="utf-8") as f:
+                existing_hash = SRTHandler.get_hash(f.read())
+            if existing_hash == SRTHandler.get_hash(standardized_content):
+                logger.info(f"[STEP 3] Already up-to-date: {input_file.name}")
+                return
 
         logger.info(f"[STEP 3] Standardizing structure: {input_file.name}")
 

@@ -134,3 +134,41 @@ class BaseTranslator(DirectoryMirrorTask):
             Always, unless overridden by a subclass.
         """
         raise NotImplementedError
+
+    @staticmethod
+    def _is_chunk_untranslated(source_blocks: list[dict], translated_blocks: list[dict]) -> bool:
+        """Check if translated blocks are identical to source (not actually translated).
+
+        Compares the text content of each block pair.  If more than
+        half the blocks are textually identical (case-insensitive),
+        the chunk is considered untranslated.
+
+        Parameters
+        ----------
+        source_blocks : list of dict
+            Original SRT blocks before translation.
+        translated_blocks : list of dict
+            Blocks returned by the translation engine.
+
+        Returns
+        -------
+        bool
+            ``True`` if the chunk appears untranslated.
+        """
+        if not translated_blocks:
+            return True
+
+        def _text(block: dict) -> str:
+            raw = block.get("text", "")
+            return "\n".join(raw).strip() if isinstance(raw, list) else str(raw).strip()
+
+        pairs = min(len(source_blocks), len(translated_blocks))
+        if pairs == 0:
+            return True
+
+        identical = sum(
+            1
+            for src, tgt in zip(source_blocks[:pairs], translated_blocks[:pairs])
+            if _text(src).lower() == _text(tgt).lower()
+        )
+        return identical / pairs > 0.5

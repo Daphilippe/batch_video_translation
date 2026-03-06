@@ -7,7 +7,7 @@ from modules.providers.base_provider import LLMProvider, LLMProviderError
 logger = logging.getLogger(__name__)
 
 
-class LlamaCPPProvider(LLMProvider):
+class LlamaCPPProvider(LLMProvider):  # pylint: disable=too-few-public-methods
     """LLM provider that communicates with a local llama.cpp server.
 
     Sends requests to the OpenAI-compatible

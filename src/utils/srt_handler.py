@@ -58,6 +58,10 @@ class SRTHandler:
         td = timedelta(hours=h, minutes=m, seconds=s, milliseconds=ms)
         new_td = td + timedelta(seconds=offset_seconds)
 
+        # Clamp to zero — negative timestamps are invalid in SRT
+        if new_td.total_seconds() < 0:
+            return "00:00:00,000"
+
         # Extract new components
         total_seconds = int(new_td.total_seconds())
         new_h = total_seconds // 3600
@@ -347,8 +351,8 @@ class SRTHandler:
 
         for b in blocks:
             text = "\n".join(b["text"]).strip() if isinstance(b["text"], list) else b["text"]
-            if prev and text == prev["text"]:
-                prev["end"] = b["end"]
+            if prev is not None and text == prev["text"]:  # pylint: disable=unsubscriptable-object
+                prev["end"] = b["end"]  # pylint: disable=unsupported-assignment-operation
             else:
                 prev = {"start": b["start"], "end": b["end"], "text": text}
                 merged.append(prev)

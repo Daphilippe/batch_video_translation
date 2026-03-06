@@ -33,6 +33,7 @@ World
 
 # --- shift_timestamp ---
 
+
 class TestShiftTimestamp:
     def test_basic_offset(self):
         result = SRTHandler.shift_timestamp("00:00:01,000", 60)
@@ -60,6 +61,7 @@ class TestShiftTimestamp:
 
 
 # --- apply_offset_to_blocks ---
+
 
 class TestApplyOffsetToBlocks:
     def test_with_offset(self):
@@ -89,6 +91,7 @@ class TestApplyOffsetToBlocks:
 
 # --- clean_text ---
 
+
 class TestCleanText:
     def test_removes_bold_markers(self):
         assert SRTHandler.clean_text("**Hello**") == "Hello"
@@ -108,6 +111,7 @@ class TestCleanText:
 
 
 # --- canonicalize ---
+
 
 class TestCanonicalize:
     def test_removes_bom(self):
@@ -133,6 +137,7 @@ class TestCanonicalize:
 
 # --- get_hash ---
 
+
 class TestGetHash:
     def test_deterministic(self):
         h1 = SRTHandler.get_hash("Hello")
@@ -151,6 +156,7 @@ class TestGetHash:
 
 
 # --- parse_to_blocks ---
+
 
 class TestParseToBlocks:
     def test_standard_srt(self):
@@ -203,6 +209,7 @@ class TestParseToBlocks:
 
 # --- merge_identical_blocks ---
 
+
 class TestMergeIdenticalBlocks:
     def test_merges_consecutive_identical(self):
         blocks = [
@@ -248,6 +255,7 @@ class TestMergeIdenticalBlocks:
 
 # --- render_blocks ---
 
+
 class TestRenderBlocks:
     def test_renders_valid_srt_format(self):
         blocks = [
@@ -283,6 +291,7 @@ class TestRenderBlocks:
 
 
 # --- standardize (full pipeline) ---
+
 
 class TestStandardize:
     def test_merges_duplicate_blocks(self):
@@ -345,6 +354,7 @@ class TestStandardize:
 
 
 # --- apply_offset_to_blocks (immutability) ---
+
 
 class TestApplyOffsetImmutability:
     def test_does_not_mutate_original_blocks(self):
@@ -478,10 +488,7 @@ class TestChineseSupport:
         assert blocks[0]["text"] == ["１２３"]  # noqa: RUF001
 
     def test_merge_identical_chinese(self):
-        content = (
-            "1\n00:00:01,000 --> 00:00:02,000\n你好\n\n"
-            "2\n00:00:02,000 --> 00:00:03,000\n你好\n"
-        )
+        content = "1\n00:00:01,000 --> 00:00:02,000\n你好\n\n2\n00:00:02,000 --> 00:00:03,000\n你好\n"
         result = SRTHandler.standardize(content)
         blocks = SRTHandler.parse_to_blocks(result)
         assert len(blocks) == 1
@@ -536,15 +543,15 @@ class TestMixedScriptSupport:
 
     def test_chinese_quotes_preserved(self):
         """Chinese-style quotes (「」) should be preserved, not stripped."""
-        content = '1\n00:00:01,000 --> 00:00:02,000\n他说「你好」\n'
+        content = "1\n00:00:01,000 --> 00:00:02,000\n他说「你好」\n"
         blocks = SRTHandler.parse_to_blocks(content)
-        assert blocks[0]["text"] == ['他说「你好」']
+        assert blocks[0]["text"] == ["他说「你好」"]
 
     def test_russian_quotes_preserved(self):
         """Russian-style quotes (« ») should be preserved, not stripped."""
-        content = '1\n00:00:01,000 --> 00:00:02,000\nОн сказал «привет»\n'  # noqa: RUF001
+        content = "1\n00:00:01,000 --> 00:00:02,000\nОн сказал «привет»\n"  # noqa: RUF001
         blocks = SRTHandler.parse_to_blocks(content)
-        assert blocks[0]["text"] == ['Он сказал «привет»']
+        assert blocks[0]["text"] == ["Он сказал «привет»"]
 
     def test_clean_text_preserves_cjk(self):
         """clean_text should not corrupt CJK characters."""
@@ -556,7 +563,135 @@ class TestMixedScriptSupport:
         """NFC normalization should handle composed vs decomposed forms."""
         # é can be U+00E9 (precomposed) or U+0065 + U+0301 (decomposed)
         decomposed = "caf\u0065\u0301"  # e + combining acute
-        composed = "café"              # precomposed é
+        composed = "café"  # precomposed é
         h1 = SRTHandler.get_hash(decomposed)
         h2 = SRTHandler.get_hash(composed)
         assert h1 == h2  # NFC normalization should make these identical
+
+
+# --- timestamp_to_seconds ---
+
+
+class TestTimestampToSeconds:
+    def test_zero(self):
+        assert SRTHandler.timestamp_to_seconds("00:00:00,000") == 0.0
+
+    def test_simple_seconds(self):
+        assert SRTHandler.timestamp_to_seconds("00:00:05,000") == 5.0
+
+    def test_minutes_and_seconds(self):
+        assert SRTHandler.timestamp_to_seconds("00:01:30,500") == 90.5
+
+    def test_hours(self):
+        assert SRTHandler.timestamp_to_seconds("01:00:00,000") == 3600.0
+
+    def test_full_timestamp(self):
+        assert SRTHandler.timestamp_to_seconds("01:23:45,678") == 5025.678
+
+    def test_millisecond_precision(self):
+        result = SRTHandler.timestamp_to_seconds("00:00:00,001")
+        assert abs(result - 0.001) < 1e-6
+
+
+# --- get_blocks_in_range ---
+
+
+class TestGetBlocksInRange:
+    def test_single_block_in_range(self):
+        blocks = [
+            {"start": "00:00:01,000", "end": "00:00:03,000", "text": "A"},
+            {"start": "00:00:05,000", "end": "00:00:07,000", "text": "B"},
+        ]
+        result = SRTHandler.get_blocks_in_range(blocks, 0.0, 4.0)
+        assert len(result) == 1
+        assert result[0]["text"] == "A"
+
+    def test_all_blocks_in_range(self):
+        blocks = [
+            {"start": "00:00:01,000", "end": "00:00:03,000", "text": "A"},
+            {"start": "00:00:05,000", "end": "00:00:07,000", "text": "B"},
+        ]
+        result = SRTHandler.get_blocks_in_range(blocks, 0.0, 10.0)
+        assert len(result) == 2
+
+    def test_no_blocks_in_range(self):
+        blocks = [
+            {"start": "00:00:10,000", "end": "00:00:12,000", "text": "A"},
+        ]
+        result = SRTHandler.get_blocks_in_range(blocks, 0.0, 5.0)
+        assert len(result) == 0
+
+    def test_overlap_detection(self):
+        """Block that partially overlaps must be included."""
+        blocks = [
+            {"start": "00:00:02,000", "end": "00:00:06,000", "text": "A"},
+        ]
+        result = SRTHandler.get_blocks_in_range(blocks, 4.0, 8.0)
+        assert len(result) == 1
+
+    def test_margin_tolerance(self):
+        """Blocks at exact boundary should be included thanks to margin."""
+        blocks = [
+            {"start": "00:00:05,000", "end": "00:00:07,000", "text": "A"},
+        ]
+        # Range ends exactly at block start → margin should catch it
+        result = SRTHandler.get_blocks_in_range(blocks, 0.0, 5.0, margin=0.05)
+        assert len(result) == 1
+
+    def test_empty_blocks(self):
+        result = SRTHandler.get_blocks_in_range([], 0.0, 10.0)
+        assert result == []
+
+
+# --- extract_timestamps ---
+
+
+class TestExtractTimestamps:
+    def test_extracts_from_valid_file(self, tmp_path):
+        srt_file = tmp_path / "test.srt"
+        srt_file.write_text(
+            "1\n00:00:01,000 --> 00:00:03,000\nHello\n\n2\n00:00:04,000 --> 00:00:06,000\nWorld\n",
+            encoding="utf-8",
+        )
+        result = SRTHandler.extract_timestamps(srt_file)
+        assert len(result) == 2
+        assert result[0] == "00:00:01,000 --> 00:00:03,000"
+        assert result[1] == "00:00:04,000 --> 00:00:06,000"
+
+    def test_nonexistent_file_returns_empty(self, tmp_path):
+        result = SRTHandler.extract_timestamps(tmp_path / "missing.srt")
+        assert result == []
+
+    def test_file_without_timestamps(self, tmp_path):
+        srt_file = tmp_path / "empty.srt"
+        srt_file.write_text("No timestamps here\n", encoding="utf-8")
+        result = SRTHandler.extract_timestamps(srt_file)
+        assert result == []
+
+    def test_ignores_malformed_timestamps(self, tmp_path):
+        srt_file = tmp_path / "bad.srt"
+        srt_file.write_text(
+            "1\n00:00:01,000 --> 00:00:03,000\nGood\n\n2\nmalformed --> line\nBad\n",
+            encoding="utf-8",
+        )
+        result = SRTHandler.extract_timestamps(srt_file)
+        assert len(result) == 1
+
+
+# --- shift_timestamp negative offset ---
+
+
+class TestShiftTimestampNegative:
+    def test_negative_offset_clamps_to_zero(self):
+        """Negative offset producing negative time should clamp to 00:00:00,000."""
+        result = SRTHandler.shift_timestamp("00:00:05,000", -10)
+        assert result == "00:00:00,000"
+
+    def test_negative_offset_valid_result(self):
+        """Negative offset that stays positive should work normally."""
+        result = SRTHandler.shift_timestamp("00:01:00,000", -30)
+        assert result == "00:00:30,000"
+
+    def test_exact_zero_from_negative(self):
+        result = SRTHandler.shift_timestamp("00:00:10,000", -10)
+        assert result == "00:00:00,000"

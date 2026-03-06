@@ -23,27 +23,22 @@ class WhisperTranscriber(DirectoryMirrorTask):
         Root directory containing per-video segment folders.
     output_dir : str
         Directory where merged ``.srt`` files are written.
-    whisper_bin : str
-        Path to the Whisper.cpp executable.
-    model_path : str
-        Path to the Whisper GGML model file.
-    lang : str, optional
-        Language code for Whisper (default ``"auto"``).
-    segment_time : int, optional
-        Duration of each audio segment in seconds (default 600).
-        Must match the value used in ``AudioExtractor``.
+    config : dict
+        Whisper configuration with keys ``bin_path``,
+        ``model_path``, and optionally ``lang`` (default
+        ``"auto"``) and ``segment_time`` (default 600).
 
     Raises
     ------
     FileNotFoundError
-        If *whisper_bin* or *model_path* does not exist.
+        If ``bin_path`` or ``model_path`` does not exist.
     """
-    def __init__(self, input_dir: str, output_dir: str, whisper_bin: str, model_path: str, lang: str = "auto", segment_time: int = 600):
+    def __init__(self, input_dir: str, output_dir: str, config: dict):
         super().__init__(input_dir, output_dir, extensions=("",))
-        self.whisper_bin = Path(whisper_bin)
-        self.model_path = Path(model_path)
-        self.lang = lang
-        self.segment_time = segment_time
+        self.whisper_bin = Path(config["bin_path"])
+        self.model_path = Path(config["model_path"])
+        self.lang = config.get("lang", "auto")
+        self.segment_time = config.get("segment_time", 600)
 
         # Validate whisper binary existence
         if not self.whisper_bin.exists():
@@ -89,6 +84,70 @@ class WhisperTranscriber(DirectoryMirrorTask):
         for folder in video_folders:
             self.process_file(folder)
 
+    def _transcribe_segment(self, segment: Path, segment_index: int) -> list[dict]:
+        """Transcribe a single audio segment via Whisper.cpp.
+
+        Runs the Whisper binary, shifts timestamps by the segment
+        offset, and caches the realigned SRT in the segment's
+        ``srt_cache/`` folder.
+
+        Parameters
+        ----------
+        segment : Path
+            Path to the ``.wav`` audio segment file.
+        segment_index : int
+            Zero-based segment number (used for time offset).
+
+        Returns
+        -------
+        list of dict
+            Realigned SRT blocks, or an empty list on failure.
+        """
+        cache_dir = segment.parent / "srt_cache"
+        cache_dir.mkdir(exist_ok=True)
+        realigned_cache_srt = cache_dir / f"{segment.stem}_realigned.srt"
+
+        # Check cache first
+        if realigned_cache_srt.exists():
+            logger.info(f"  -> Using cached segment {segment_index}: {segment.name}")
+            with open(realigned_cache_srt, encoding="utf-8") as f:
+                return SRTHandler.parse_to_blocks(f.read())
+
+        # Transcribe
+        temp_output_prefix = segment.with_suffix("")
+        whisper_srt_output = segment.with_suffix(".srt")
+
+        cmd = [
+            str(self.whisper_bin), "-m", str(self.model_path),
+            "-f", self._get_short_path(segment),
+            "-osrt", "-of", self._get_short_path(temp_output_prefix),
+            "-l", self.lang, "-p", "4", "-sow", "1"
+        ]
+
+        try:
+            logger.info(f"  -> Transcribing segment {segment_index}: {segment.name}")
+            subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+
+            if not whisper_srt_output.exists():
+                return []
+
+            with open(whisper_srt_output, encoding="utf-8") as f:
+                content = f.read()
+
+            offset_seconds = segment_index * self.segment_time
+            blocks = SRTHandler.parse_to_blocks(content)
+            shifted_blocks = SRTHandler.apply_offset_to_blocks(blocks, offset_seconds)
+
+            with open(realigned_cache_srt, "w", encoding="utf-8") as f:
+                f.write(SRTHandler.render_blocks(shifted_blocks))
+
+            whisper_srt_output.unlink()
+            return shifted_blocks
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[ERROR] Failed segment {segment.name}: {e.stderr}")
+            return []
+
     def process_file(self, input_file: Path):  # pylint: disable=arguments-renamed
         """
         Transcribe all audio segments in a video folder.
@@ -103,9 +162,6 @@ class WhisperTranscriber(DirectoryMirrorTask):
             Path to the per-video segment folder (not a single file).
         """
         final_srt_path = Path(self.output_dir) / f"{input_file.name}.srt"
-        # Temporary folder for realigned segments
-        cache_dir = input_file / "srt_cache"
-        cache_dir.mkdir(exist_ok=True)
 
         if final_srt_path.exists():
             logger.info(f"[SKIP] Video already fully transcribed: {final_srt_path.name}")
@@ -117,51 +173,7 @@ class WhisperTranscriber(DirectoryMirrorTask):
         logger.info(f"[START] Processing: {input_file.name} ({len(segments)} segments)")
 
         for i, segment in enumerate(segments):
-            # Path for the realigned intermediate SRT
-            realigned_cache_srt = cache_dir / f"{segment.stem}_realigned.srt"
-
-            # --- CHECK IF SEGMENT IS ALREADY IN CACHE ---
-            if realigned_cache_srt.exists():
-                logger.info(f"  -> Using cached segment {i}: {segment.name}")
-                with open(realigned_cache_srt, encoding="utf-8") as f:
-                    all_blocks.extend(SRTHandler.parse_to_blocks(f.read()))
-                continue
-
-            # --- TRANSCRIBE IF NOT IN CACHE ---
-            temp_output_prefix = segment.with_suffix("")
-            whisper_srt_output = segment.with_suffix(".srt") # whisper adds .srt
-
-            cmd = [
-                str(self.whisper_bin), "-m", str(self.model_path),
-                "-f", self._get_short_path(segment),
-                "-osrt", "-of", self._get_short_path(temp_output_prefix),
-                "-l", self.lang, "-p", "4", "-sow", "1"
-            ]
-
-            try:
-                logger.info(f"  -> Transcribing segment {i}: {segment.name}")
-                subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
-
-                if whisper_srt_output.exists():
-                    with open(whisper_srt_output, encoding="utf-8") as f:
-                        content = f.read()
-
-                    # Shift and Realign
-                    offset_seconds = i * self.segment_time
-                    blocks = SRTHandler.parse_to_blocks(content)
-                    shifted_blocks = SRTHandler.apply_offset_to_blocks(blocks, offset_seconds)
-
-                    # SAVE TO CACHE
-                    with open(realigned_cache_srt, "w", encoding="utf-8") as f:
-                        f.write(SRTHandler.render_blocks(shifted_blocks))
-
-                    all_blocks.extend(shifted_blocks)
-
-                    # Delete the raw Whisper SRT (only keep the realigned cache)
-                    whisper_srt_output.unlink()
-
-            except subprocess.CalledProcessError as e:
-                logger.error(f"[ERROR] Failed segment {segment.name}: {e.stderr}")
+            all_blocks.extend(self._transcribe_segment(segment, i))
 
         # Final Render
         if all_blocks:
@@ -182,7 +194,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     transcriber = WhisperTranscriber(
-        args.input, args.output, args.bin, args.model,
-        lang=args.lang, segment_time=args.time
+        args.input, args.output,
+        config={"bin_path": args.bin, "model_path": args.model, "lang": args.lang, "segment_time": args.time}
     )
     transcriber.run()

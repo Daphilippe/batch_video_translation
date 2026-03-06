@@ -41,11 +41,7 @@ class TestDirectoryMirrorTask:
 
     def test_run_nonexistent_input_dir(self, tmp_path):
         """Should log error and return without crashing."""
-        task = DirectoryMirrorTask(
-            str(tmp_path / "nonexistent"),
-            str(tmp_path / "output"),
-            (".srt",)
-        )
+        task = DirectoryMirrorTask(str(tmp_path / "nonexistent"), str(tmp_path / "output"), (".srt",))
         task.run()  # Should not raise
 
     def test_process_file_raises_not_implemented(self, tmp_path):

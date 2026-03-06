@@ -1,50 +1,47 @@
 {
     "version": "2.0.0",
+    "options": {
+        "shell": {
+            "executable": "powershell.exe",
+            "args": ["-NoProfile", "-Command"]
+        },
+        "env": {
+            "PYTHONDONTWRITEBYTECODE": "1"
+        }
+    },
     "tasks": [
-        // ── Linting ───────────────────────────────────────────────
+        // ── 🔍 Linting ───────────────────────────────────────────
         {
-            "label": "Ruff: lint",
+            "label": "🔍 Ruff: lint",
             "type": "shell",
-            "command": "python",
+            "command": "${command:python.interpreterPath}",
             "args": ["-m", "ruff", "check", "src/", "tests/"],
             "group": "test",
             "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "clear": true
-            }
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
         },
         {
-            "label": "Ruff: lint + fix",
+            "label": "🔧 Ruff: lint + fix",
             "type": "shell",
-            "command": "python",
+            "command": "${command:python.interpreterPath}",
             "args": ["-m", "ruff", "check", "--fix", "src/", "tests/"],
             "group": "test",
             "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "clear": true
-            }
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
         },
         {
-            "label": "Ruff: format",
+            "label": "✨ Ruff: format",
             "type": "shell",
-            "command": "python",
+            "command": "${command:python.interpreterPath}",
             "args": ["-m", "ruff", "format", "src/", "tests/"],
             "group": "test",
             "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "clear": true
-            }
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
         },
         {
-            "label": "Pylint: full analysis",
+            "label": "🔍 Pylint: full analysis",
             "type": "shell",
-            "command": "python",
+            "command": "${command:python.interpreterPath}",
             "args": [
                 "-m", "pylint",
                 "src/modules/", "src/utils/", "src/main.py",
@@ -52,77 +49,153 @@
             ],
             "group": "test",
             "problemMatcher": "$pylint",
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "clear": true
-            }
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
         },
-        // ── Testing ───────────────────────────────────────────────
+
+        // ── 🧪 Testing ───────────────────────────────────────────
         {
-            "label": "Pytest: run all",
+            "label": "🧪 Pytest: run all",
             "type": "shell",
-            "command": "python",
+            "command": "${command:python.interpreterPath}",
             "args": ["-m", "pytest", "tests/", "-v"],
-            "group": {
-                "kind": "test",
-                "isDefault": true
-            },
+            "group": { "kind": "test", "isDefault": true },
             "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "clear": true
-            }
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
         },
         {
-            "label": "Coverage: run + report",
+            "label": "📊 Coverage: run + report",
             "type": "shell",
-            "command": "python",
+            "command": "${command:python.interpreterPath}",
             "args": [
                 "-m", "pytest",
                 "--cov=src",
                 "--cov-config=pyproject.toml",
                 "--cov-report=term-missing",
                 "--cov-report=html",
-                "tests/",
-                "-v"
+                "tests/", "-v"
             ],
             "group": "test",
             "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "clear": true
-            }
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
         },
         {
-            "label": "Coverage: open HTML report",
+            "label": "📊 Coverage: open report",
             "type": "shell",
-            "command": "start",
-            "args": ["htmlcov/index.html"],
-            "windows": {
-                "command": "start",
-                "args": ["htmlcov\\index.html"]
-            },
-            "dependsOn": "Coverage: run + report",
-            "problemMatcher": []
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "webbrowser", "htmlcov/index.html"],
+            "dependsOn": "📊 Coverage: run + report",
+            "problemMatcher": [],
+            "presentation": { "reveal": "silent" }
         },
-        // ── Combined ──────────────────────────────────────────────
+
+        // ── ✅ Quality ───────────────────────────────────────────
         {
-            "label": "Quality: full check (ruff + pylint + coverage)",
+            "label": "✅ Quality: full check",
             "dependsOn": [
-                "Ruff: lint",
-                "Pylint: full analysis",
-                "Coverage: run + report"
+                "🔍 Ruff: lint",
+                "🔍 Pylint: full analysis",
+                "📊 Coverage: run + report"
             ],
             "dependsOrder": "sequence",
             "group": "test",
             "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            }
+            "presentation": { "reveal": "always", "panel": "shared" }
+        },
+
+        // ── 🧹 Cleanup ───────────────────────────────────────────
+        {
+            "label": "🧹 Clean: pycache",
+            "detail": "Remove all __pycache__ directories and .pyc files",
+            "type": "shell",
+            "command": "Get-ChildItem -Path . -Include __pycache__ -Recurse -Directory | Remove-Item -Recurse -Force; Get-ChildItem -Path . -Include *.pyc -Recurse -File | Remove-Item -Force; Write-Host '✔ __pycache__ cleaned'",
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+        },
+
+        // ── 📦 Dependencies ──────────────────────────────────────
+        {
+            "label": "📦 Deps: lock (pip-compile)",
+            "detail": "Resolve pyproject.toml → requirements.txt with pinned versions",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": [
+                "-m", "piptools", "compile",
+                "pyproject.toml",
+                "--output-file=requirements.txt",
+                "--strip-extras",
+                "--quiet"
+            ],
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+        },
+        {
+            "label": "📦 Deps: sync (pip-sync)",
+            "detail": "Install exactly what requirements.txt specifies into the venv",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "piptools", "sync", "requirements.txt"],
+            "dependsOn": "📦 Deps: lock (pip-compile)",
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+        },
+        {
+            "label": "📦 Deps: install dev",
+            "detail": "Install project with dev extras (ruff, pylint, pytest, pip-tools)",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "pip", "install", "-e", ".[dev]"],
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+        },
+
+        // ── 🤖 Agent ─────────────────────────────────────────────
+        {
+            "label": "🤖 Agent: plan-execute",
+            "detail": "Default mode — plans steps then executes them sequentially",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["tools/agent/agent.py"],
+            "group": "none",
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+        },
+        {
+            "label": "⚡ Agent: react",
+            "detail": "Simple ReAct loop — think → act → observe",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["tools/agent/agent.py", "--react"],
+            "group": "none",
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+        },
+        {
+            "label": "👥 Agent: multi-agent",
+            "detail": "Orchestrator decomposes task into sub-tasks for worker agents",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["tools/agent/agent.py", "--multi"],
+            "group": "none",
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+        },
+        {
+            "label": "🛡️ Agent: confirm mode",
+            "detail": "Plan-execute with manual confirmation before each tool call",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["tools/agent/agent.py", "--confirm"],
+            "group": "none",
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
         }
     ]
 }
